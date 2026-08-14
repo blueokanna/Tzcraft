@@ -88,6 +88,21 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  # docs.rs builds on nightly with `--cfg docsrs`; that combination can break
+  # in ways stable cannot see (removed `#![feature(...)]`, unstable API drift),
+  # so mirror it here instead of discovering it after a release.
+  docsrs:
+    name: Docs (docs.rs condition)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Build docs exactly like docs.rs
+        run: cargo doc --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: --cfg docsrs
+
   audit:
     name: Security audit
     runs-on: ubuntu-latest

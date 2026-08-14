@@ -195,7 +195,7 @@ cargo audit
 
 ## CI
 
-`.github/workflows/ci.yml` 在每次 push 和 PR 上运行：格式检查、`-D warnings` 的 clippy、debug + release 双模式测试、feature 矩阵（无默认 / `std` / `serde` / `binary`）、`-D warnings` 的文档构建、RustSec 公告库安全审计，以及在声明的 **MSRV 1.81** 上跑全套测试（下限由 `rustbinary` 决定，它需要 `error_in_core`）。
+`.github/workflows/ci.yml` 在每次 push 和 PR 上运行：格式检查、`-D warnings` 的 clippy、debug + release 双模式测试、feature 矩阵（无默认 / `std` / `serde` / `binary`）、`-D warnings` 的文档构建、**docs.rs 同款构建**（nightly + `--cfg docsrs`，与 docs.rs 实际使用的标志完全一致）、RustSec 公告库安全审计，以及在声明的 **MSRV 1.81** 上跑全套测试（下限由 `rustbinary` 决定，它需要 `error_in_core`）。
 
 ## 许可
 

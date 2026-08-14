@@ -1,4 +1,4 @@
-# tzcraft
+# Tzcraft
 
 [![CI](https://github.com/blueokanna/Tzcraft/actions/workflows/ci.yml/badge.svg)](https://github.com/blueokanna/Tzcraft/actions/workflows/ci.yml)
 
@@ -257,9 +257,10 @@ cargo audit
 `.github/workflows/ci.yml` runs on every push and pull request: formatting,
 clippy with `-D warnings`, debug and release tests, the feature matrix
 (no-default / `std` / `serde` / `binary`), docs built with `-D warnings`, a
-security audit against the RustSec advisory database, and the full test
-suite at the declared MSRV **1.81** (the floor is set by `rustbinary`, which
-needs `error_in_core`).
+`docs.rs`-condition build (nightly with `--cfg docsrs`, the exact flags
+docs.rs uses), a security audit against the RustSec advisory database, and
+the full test suite at the declared MSRV **1.81** (the floor is set by
+`rustbinary`, which needs `error_in_core`).
 
 ## License
 
