@@ -214,7 +214,10 @@ impl Duration {
 
     /// Checked negation; fails on `i128::MIN`.
     pub fn checked_neg(self) -> Result<Duration> {
-        self.0.checked_neg().map(Duration).ok_or_else(Error::overflow)
+        self.0
+            .checked_neg()
+            .map(Duration)
+            .ok_or_else(Error::overflow)
     }
 
     /// Checked addition.
@@ -355,7 +358,10 @@ mod tests {
             Duration::weeks(i64::MAX).as_nanos(),
             i64::MAX as i128 * 7 * NS_PER_DAY
         );
-        assert_eq!(Duration::minutes(i64::MAX), Duration::from_minutes(i64::MAX));
+        assert_eq!(
+            Duration::minutes(i64::MAX),
+            Duration::from_minutes(i64::MAX)
+        );
         assert_eq!(Duration::hours(i64::MAX), Duration::from_hours(i64::MAX));
         assert_eq!(Duration::days(i64::MAX), Duration::from_days(i64::MAX));
         assert_eq!(Duration::from_days(-1).as_nanos(), -NS_PER_DAY);
@@ -394,19 +400,15 @@ mod tests {
             Duration::from_iso8601("P2W").unwrap().as_nanos(),
             1_209_600_000_000_000
         );
-        assert_eq!(
-            Duration::from_iso8601("P2W").unwrap().to_iso8601(),
-            "P14D"
-        );
-        assert_eq!(
-            Duration::from_iso8601("P1W").unwrap().to_iso8601(),
-            "P7D"
-        );
+        assert_eq!(Duration::from_iso8601("P2W").unwrap().to_iso8601(), "P14D");
+        assert_eq!(Duration::from_iso8601("P1W").unwrap().to_iso8601(), "P7D");
     }
 
     #[test]
     fn iso_rejects_calendar_ambiguous() {
-        for s in ["P1Y", "P1M", "P", "PT", "P1S", "P1DT", "P1DT5", "abc", "PT1H2D"] {
+        for s in [
+            "P1Y", "P1M", "P", "PT", "P1S", "P1DT", "P1DT5", "abc", "PT1H2D",
+        ] {
             assert!(Duration::from_iso8601(s).is_err(), "{s} should fail");
         }
     }

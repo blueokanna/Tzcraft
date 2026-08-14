@@ -5,14 +5,18 @@
 //! surface works end to end. Where a `chrono` name differs, the mapping is
 //! documented in the README.
 
+#![cfg(feature = "std")]
+
 use tzcraft::{
-    CivilDateTime, Date, Days, Duration, Months, Offset, TimeOfDay, Ticks, Weekday, Zone, Zoned,
+    CivilDateTime, Date, Days, Duration, Months, Offset, Ticks, TimeOfDay, Weekday, Zone, Zoned,
 };
 
 #[test]
 fn duration_chrono_constructors_and_counts() {
     assert_eq!(
-        Duration::minutes(1).checked_add(Duration::seconds(30)).unwrap(),
+        Duration::minutes(1)
+            .checked_add(Duration::seconds(30))
+            .unwrap(),
         Duration::seconds(90)
     );
     assert_eq!(Duration::hours(2).num_minutes().unwrap(), 120);
@@ -40,16 +44,31 @@ fn date_chrono_patterns() {
     assert_eq!(d.iso_week().year(), 2024);
 
     // chrono: d.checked_add_months(Months::new(1))
-    assert_eq!(d.checked_add_months(Months::new(1)).unwrap(), Date::from_ymd(2024, 3, 29).unwrap());
-    assert_eq!(d.checked_sub_months(Months::new(1)).unwrap(), Date::from_ymd(2024, 1, 29).unwrap());
+    assert_eq!(
+        d.checked_add_months(Months::new(1)).unwrap(),
+        Date::from_ymd(2024, 3, 29).unwrap()
+    );
+    assert_eq!(
+        d.checked_sub_months(Months::new(1)).unwrap(),
+        Date::from_ymd(2024, 1, 29).unwrap()
+    );
 
     // chrono: d.checked_add_days(Days::new(1))
-    assert_eq!(d.checked_add_days(Days::new(1)).unwrap(), Date::from_ymd(2024, 3, 1).unwrap());
-    assert_eq!(d.checked_sub_days(Days::new(1)).unwrap(), Date::from_ymd(2024, 2, 28).unwrap());
+    assert_eq!(
+        d.checked_add_days(Days::new(1)).unwrap(),
+        Date::from_ymd(2024, 3, 1).unwrap()
+    );
+    assert_eq!(
+        d.checked_sub_days(Days::new(1)).unwrap(),
+        Date::from_ymd(2024, 2, 28).unwrap()
+    );
 
     // chrono: NaiveDate::parse_from_str
     assert_eq!(Date::parse_from_str("29.02.2024", "%d.%m.%Y").unwrap(), d);
-    assert_eq!(Date::parse_from_str("Thu Feb 29 2024", "%a %b %d %Y").unwrap(), d);
+    assert_eq!(
+        Date::parse_from_str("Thu Feb 29 2024", "%a %b %d %Y").unwrap(),
+        d
+    );
 
     // chrono: with_year / with_month / with_day
     assert_eq!(d.with_year(2028).unwrap().year(), 2028);
@@ -60,10 +79,16 @@ fn date_chrono_patterns() {
 #[test]
 fn datetime_chrono_patterns() {
     // chrono: date.and_hms_opt(12, 0, 0)
-    let dt = Date::from_ymd(2024, 2, 29).unwrap().and_hms(12, 0, 0).unwrap();
+    let dt = Date::from_ymd(2024, 2, 29)
+        .unwrap()
+        .and_hms(12, 0, 0)
+        .unwrap();
 
     // chrono: dt.format("%Y-%m-%d %H:%M:%S")
-    assert_eq!(dt.format("%Y-%m-%d %H:%M:%S").unwrap(), "2024-02-29 12:00:00");
+    assert_eq!(
+        dt.format("%Y-%m-%d %H:%M:%S").unwrap(),
+        "2024-02-29 12:00:00"
+    );
 
     // chrono: dt.checked_add_signed(chrono::Duration::days(1))
     assert_eq!(
@@ -112,23 +137,42 @@ fn instant_chrono_patterns() {
 
     // chrono: DateTime::<Utc>::from_timestamp(secs, nsecs)
     let t = Ticks::from_timestamp(1_700_000_000, 0).unwrap();
-    assert_eq!(t.to_rfc3339(tzcraft::FractionDigits::None), "2023-11-14T22:13:20Z");
+    assert_eq!(
+        t.to_rfc3339(tzcraft::FractionDigits::None),
+        "2023-11-14T22:13:20Z"
+    );
 
     // chrono: DateTime::parse_from_rfc3339 / parse_from_rfc2822
     let z = Zoned::from_rfc3339("2024-06-15T12:00:00+08:00").unwrap();
-    assert_eq!(z.format("%Y-%m-%d %H:%M:%S %:z").unwrap(), "2024-06-15 12:00:00 +08:00");
-    assert_eq!(z.timestamp().unwrap(), Ticks::from_rfc3339("2024-06-15T04:00:00Z").unwrap().timestamp().unwrap());
+    assert_eq!(
+        z.format("%Y-%m-%d %H:%M:%S %:z").unwrap(),
+        "2024-06-15 12:00:00 +08:00"
+    );
+    assert_eq!(
+        z.timestamp().unwrap(),
+        Ticks::from_rfc3339("2024-06-15T04:00:00Z")
+            .unwrap()
+            .timestamp()
+            .unwrap()
+    );
 
     // chrono: dt.with_timezone(Utc)
     let utc = z.with_zone(Zone::Utc);
-    assert_eq!(utc.to_rfc3339(tzcraft::FractionDigits::None), "2024-06-15T04:00:00Z");
+    assert_eq!(
+        utc.to_rfc3339(tzcraft::FractionDigits::None),
+        "2024-06-15T04:00:00Z"
+    );
 
     // chrono: DateTime::naive_utc() / naive_local() equivalents
     assert_eq!(z.civil().unwrap().to_iso(), "2024-06-15T12:00:00");
-    assert_eq!(z.to_utc().to_civil_utc().unwrap().to_iso(), "2024-06-15T04:00:00");
+    assert_eq!(
+        z.to_utc().to_civil_utc().unwrap().to_iso(),
+        "2024-06-15T04:00:00"
+    );
 
     // chrono: DateTime::parse_from_str with a fixed offset
-    let parsed = Zoned::parse_from_str("2024-06-15 12:00:00 +0800", "%Y-%m-%d %H:%M:%S %z").unwrap();
+    let parsed =
+        Zoned::parse_from_str("2024-06-15 12:00:00 +0800", "%Y-%m-%d %H:%M:%S %z").unwrap();
     assert_eq!(parsed, z);
 }
 

@@ -35,13 +35,13 @@
 use alloc::string::{String, ToString};
 
 use crate::calendar::{
-    Month, Weekday, days_from_civil, day_of_year, iso_week_from_civil, weekday_from_civil,
+    day_of_year, days_from_civil, iso_week_from_civil, weekday_from_civil, Month, Weekday,
 };
-use crate::datetime::CivilDateTime;
 use crate::date::Date;
+use crate::datetime::CivilDateTime;
 use crate::duration::Duration;
 use crate::error::{Error, Result};
-use crate::format::{Scanner, parse_rfc3339, scan_offset};
+use crate::format::{parse_rfc3339, scan_offset, Scanner};
 use crate::offset::Offset;
 use crate::ticks::Ticks;
 use crate::time::TimeOfDay;
@@ -77,7 +77,11 @@ fn pad_num(out: &mut String, v: u64, width: usize, pad: u8) {
         out.push_str(&s);
         return;
     }
-    let padc = if pad == b'_' || pad == b' ' { b' ' } else { b'0' };
+    let padc = if pad == b'_' || pad == b' ' {
+        b' '
+    } else {
+        b'0'
+    };
     for _ in s.len()..width {
         out.push(padc as char);
     }
@@ -159,7 +163,8 @@ fn week_of_year_mon(y: i32, m: u32, d: u32) -> u32 {
 
 fn parse_width(bytes: &[u8]) -> Result<u32> {
     let text = core::str::from_utf8(bytes).map_err(|_| Error::invalid("format width"))?;
-    text.parse().map_err(|_| Error::invalid("format width out of range"))
+    text.parse()
+        .map_err(|_| Error::invalid("format width out of range"))
 }
 
 /// Format `p` according to the strftime-style `fmt` string.
@@ -456,7 +461,11 @@ impl ParsedParts {
             (Some(c), Some(y2)) => Ok(Some(c * 100 + y2 as i32)),
             (None, Some(y2)) => {
                 // POSIX century inference: 69-99 -> 19xx, 00-68 -> 20xx.
-                Ok(Some(if y2 >= 69 { 1900 + y2 as i32 } else { 2000 + y2 as i32 }))
+                Ok(Some(if y2 >= 69 {
+                    1900 + y2 as i32
+                } else {
+                    2000 + y2 as i32
+                }))
             }
             (Some(_), None) => Err(Error::invalid("incomplete year (missing %y)")),
             (None, None) => Ok(None),
@@ -503,7 +512,13 @@ impl ParsedParts {
         if let Some(y) = self.isoyear {
             return Ok(Some(y));
         }
-        Ok(self.iso_year2.map(|y2| if y2 >= 69 { 1900 + y2 as i32 } else { 2000 + y2 as i32 }))
+        Ok(self.iso_year2.map(|y2| {
+            if y2 >= 69 {
+                1900 + y2 as i32
+            } else {
+                2000 + y2 as i32
+            }
+        }))
     }
 
     /// Resolve to a calendar date (calendar, ordinal, ISO-week or week-based).
@@ -952,20 +967,25 @@ fn parse_directive(
         b'V' => pp.isoweek = Some(read_int(sc, 2, pad)? as u32),
         b'u' => {
             let v = read_int(sc, 1, pad)?;
-            pp.weekday = Some(Weekday::from_iso_number(v as u32).ok_or_else(|| {
-                Error::invalid("invalid ISO weekday")
-            })?);
+            pp.weekday = Some(
+                Weekday::from_iso_number(v as u32)
+                    .ok_or_else(|| Error::invalid("invalid ISO weekday"))?,
+            );
         }
         b'w' => {
             let v = read_int(sc, 1, pad)?;
-            pp.weekday = Some(weekday_from_sunday(v).ok_or_else(|| Error::invalid("invalid weekday"))?);
+            pp.weekday =
+                Some(weekday_from_sunday(v).ok_or_else(|| Error::invalid("invalid weekday"))?);
         }
         b'U' => pp.week_sun = Some(read_int(sc, 2, pad)? as u32),
         b'W' => pp.week_mon = Some(read_int(sc, 2, pad)? as u32),
         b'z' => pp.offset = Some(scan_offset(sc)?),
         b'Z' => {
             let start = sc.pos;
-            while sc.peek().is_some_and(|b| b.is_ascii_alphabetic() || b == b'/') {
+            while sc
+                .peek()
+                .is_some_and(|b| b.is_ascii_alphabetic() || b == b'/')
+            {
                 sc.pos += 1;
             }
             if sc.pos == start {
@@ -974,9 +994,7 @@ fn parse_directive(
             let word = core::str::from_utf8(&sc.bytes[start..sc.pos])
                 .map_err(|_| Error::invalid("invalid utf-8 in input"))?;
             match word {
-                "UTC" | "GMT" | "UT" | "Z" | "Etc/UTC" | "Etc/GMT" => {
-                    pp.offset = Some(Offset::UTC)
-                }
+                "UTC" | "GMT" | "UT" | "Z" | "Etc/UTC" | "Etc/GMT" => pp.offset = Some(Offset::UTC),
                 _ => return Err(Error::invalid("unknown timezone name")),
             }
         }
@@ -999,7 +1017,10 @@ fn parse_directive(
             pp.timestamp = Some(v as i64);
         }
         b'n' => {
-            while matches!(sc.peek(), Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')) {
+            while matches!(
+                sc.peek(),
+                Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r')
+            ) {
                 sc.pos += 1;
             }
         }
@@ -1104,7 +1125,11 @@ fn parse_directive(
 // Per-type entry points
 // ---------------------------------------------------------------------------
 
-fn parts_from_civil(dt: CivilDateTime, offset: Option<Offset>, zone_name: Option<&'static str>) -> Parts {
+fn parts_from_civil(
+    dt: CivilDateTime,
+    offset: Option<Offset>,
+    zone_name: Option<&'static str>,
+) -> Parts {
     Parts {
         year: dt.year(),
         month: dt.month(),
@@ -1120,11 +1145,7 @@ fn parts_from_civil(dt: CivilDateTime, offset: Option<Offset>, zone_name: Option
 }
 
 pub(crate) fn format_date(date: Date, fmt: &str) -> Result<String> {
-    let p = parts_from_civil(
-        CivilDateTime::new(date, TimeOfDay::MIDNIGHT),
-        None,
-        None,
-    );
+    let p = parts_from_civil(CivilDateTime::new(date, TimeOfDay::MIDNIGHT), None, None);
     format_parts(fmt, &p)
 }
 
@@ -1184,7 +1205,10 @@ pub(crate) fn parse_zoned(fmt: &str, s: &str) -> Result<Zoned> {
     let pp = parse_parts(fmt, s)?;
     let offset = pp.offset.unwrap_or(Offset::UTC);
     if let Some(ts) = pp.timestamp {
-        return Ok(Zoned::new(Ticks::from_timestamp(ts, 0)?, Zone::fixed(offset)));
+        return Ok(Zoned::new(
+            Ticks::from_timestamp(ts, 0)?,
+            Zone::fixed(offset),
+        ));
     }
     let (date, time) = pp.to_civil()?;
     Zoned::from_civil(CivilDateTime::new(date, time), Zone::fixed(offset))

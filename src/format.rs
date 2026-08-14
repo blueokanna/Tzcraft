@@ -181,12 +181,7 @@ pub(crate) fn format_time(time: TimeOfDay, fraction: FractionDigits) -> String {
 /// Date plus time, no zone.
 pub(crate) fn format_civil(dt: crate::datetime::CivilDateTime, fraction: FractionDigits) -> String {
     let mut out = String::new();
-    format_date_into(
-        &mut out,
-        dt.year(),
-        dt.month(),
-        dt.day(),
-    );
+    format_date_into(&mut out, dt.year(), dt.month(), dt.day());
     out.push('T');
     let (h, mi, s, ns) = dt.time().parts();
     format_time_into(&mut out, h, mi, s, ns, fraction);
@@ -271,7 +266,7 @@ pub(crate) fn format_duration_iso(d: Duration) -> String {
 
 /// Byte scanner over a `&str` that reports failure positions.
 ///
-/// Shared with the strftime engine ([`crate::strftime`]) so both parsers
+/// Shared with the strftime engine (`strftime.rs`) so both parsers
 /// report byte offsets identically.
 pub(crate) struct Scanner<'a> {
     pub(crate) bytes: &'a [u8],
@@ -280,7 +275,10 @@ pub(crate) struct Scanner<'a> {
 
 impl<'a> Scanner<'a> {
     pub(crate) fn new(s: &'a str) -> Scanner<'a> {
-        Scanner { bytes: s.as_bytes(), pos: 0 }
+        Scanner {
+            bytes: s.as_bytes(),
+            pos: 0,
+        }
     }
 
     pub(crate) fn at_end(&self) -> bool {
@@ -718,6 +716,9 @@ mod tests {
     #[test]
     fn civil_format() {
         let dt = CivilDateTime::from_ymd_hms(2024, 2, 29, 23, 59, 59).unwrap();
-        assert_eq!(format_civil(dt, FractionDigits::None), "2024-02-29T23:59:59");
+        assert_eq!(
+            format_civil(dt, FractionDigits::None),
+            "2024-02-29T23:59:59"
+        );
     }
 }

@@ -3,8 +3,7 @@
 //! Every `tzcraft` type implements `nextjson`'s format-neutral contracts
 //! (`NsonSchema` + `NsonSerialize` + `NsonDeserialize`) exactly once. The
 //! codec selects the wire shape through
-//! [`FormatEncoder::is_human_readable`](nextjson::FormatEncoder::is_human_readable)
-//! / [`FormatDecoder::is_human_readable`](nextjson::FormatDecoder::is_human_readable):
+//! [`FormatEncoder::is_human_readable`] / [`FormatDecoder::is_human_readable`]:
 //!
 //! | type         | human-readable (nextjson JSON)      | binary (rustbinary)          |
 //! |--------------|-------------------------------------|------------------------------|
@@ -430,8 +429,7 @@ impl<'de> NsonDeserialize<'de> for Month {
                 }
                 _ => {
                     let s = dec.string()?;
-                    Month::from_name(&s)
-                        .ok_or_else(|| D::Error::custom("unknown month name"))?
+                    Month::from_name(&s).ok_or_else(|| D::Error::custom("unknown month name"))?
                 }
             };
             out.write(v);

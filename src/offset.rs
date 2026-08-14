@@ -36,6 +36,41 @@ impl Offset {
         }
     }
 
+    /// Build from a whole-second *east* offset (chrono's `FixedOffset::east`,
+    /// but `const`). Panics outside `(-24h, 24h)`.
+    ///
+    /// This exists so a fixed zone can be declared in `const` context without
+    /// `Option::unwrap` (which is not `const` on Rust < 1.83). Prefer
+    /// [`Offset::from_seconds`] when the value is untrusted.
+    ///
+    /// ```
+    /// # use tzcraft::Offset;
+    /// const TOKYO: Offset = Offset::east(9 * 3600);
+    /// # fn main() { assert_eq!(TOKYO.as_seconds(), 9 * 3600); }
+    /// ```
+    pub const fn east(seconds: i32) -> Offset {
+        match Self::from_seconds_opt(seconds) {
+            Some(offset) => offset,
+            None => panic!("timezone offset must be within ±24 hours"),
+        }
+    }
+
+    /// Build from a whole-second *west* offset (chrono's `FixedOffset::west`,
+    /// but `const`). Panics outside `(-24h, 24h)`.
+    pub const fn west(seconds: i32) -> Offset {
+        // Negate without overflowing at `i32::MIN` (which is out of range
+        // anyway and lands in the panic arm).
+        let negated = if seconds == i32::MIN {
+            i32::MIN
+        } else {
+            -seconds
+        };
+        match Self::from_seconds_opt(negated) {
+            Some(offset) => offset,
+            None => panic!("timezone offset must be within ±24 hours"),
+        }
+    }
+
     /// Build from signed hours plus minutes and seconds.
     ///
     /// `hours` carries the sign and the whole offset shares it
@@ -128,7 +163,10 @@ mod tests {
             assert_eq!(o.to_iso(), s, "{s}");
         }
         // "+0530" and "+05" parse but canonicalize to the colon form on output.
-        assert_eq!(Offset::from_iso("+0530").unwrap().as_seconds(), 5 * 3600 + 30 * 60);
+        assert_eq!(
+            Offset::from_iso("+0530").unwrap().as_seconds(),
+            5 * 3600 + 30 * 60
+        );
         assert_eq!(Offset::from_iso("+05").unwrap().as_seconds(), 5 * 3600);
         // A zero offset parses but canonicalizes to "Z".
         assert_eq!(Offset::from_iso("+00:00").unwrap(), Offset::UTC);

@@ -6,9 +6,7 @@
 //! that malformed input is rejected with an error (never a panic), and that
 //! well-formed input round-trips.
 
-use tzcraft::{
-    CivilDateTime, Date, Days, Duration, Months, Offset, Ticks, TimeOfDay, Zone, Zoned,
-};
+use tzcraft::{CivilDateTime, Date, Days, Duration, Months, Offset, Ticks, TimeOfDay, Zone, Zoned};
 
 /// A tiny deterministic PRNG (xorshift64*) so the harness needs no `rand`.
 struct Rng(u64);
@@ -231,7 +229,10 @@ fn rfc2822_round_trips() {
 
     // Named zones, obsolete 2-digit years, and missing seconds all parse.
     let z = Zoned::from_rfc2822("Mon, 1 Jan 24 10:52 GMT").unwrap();
-    assert_eq!(z.to_utc().to_rfc3339(tzcraft::FractionDigits::None), "2024-01-01T10:52:00Z");
+    assert_eq!(
+        z.to_utc().to_rfc3339(tzcraft::FractionDigits::None),
+        "2024-01-01T10:52:00Z"
+    );
     let z = Zoned::from_rfc2822("1 Jan 2024 10:52:37 -0000").unwrap();
     assert_eq!(z.zone(), Zone::Utc);
     let z = Zoned::from_rfc2822("Tue, 1 Jul 2003 10:52:37 +0200").unwrap();
@@ -244,7 +245,7 @@ fn strftime_edge_cases() {
     // Week-of-year variants.
     assert_eq!(d.format("%U").unwrap(), "52"); // Sunday-based week
     assert_eq!(d.format("%W").unwrap(), "53"); // Monday-based week (2024-12-31 is Tuesday)
-    // 12-hour clock + AM/PM round trip.
+                                               // 12-hour clock + AM/PM round trip.
     let dt = CivilDateTime::from_ymd_hms(2024, 6, 15, 23, 5, 7).unwrap();
     assert_eq!(dt.format("%I:%M %p").unwrap(), "11:05 PM");
     assert_eq!(dt.format("%-I:%M %P").unwrap(), "11:05 pm");

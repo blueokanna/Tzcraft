@@ -124,8 +124,8 @@ pub(crate) const fn civil_from_days(days: i64) -> (i32, u32, u32) {
     let z = days + DAYS_0000_TO_1970;
     let era = floor_div(z, 146_097);
     let doe = z - era * 146_097; // [0, 146096]
-    // Year-of-era from day-of-era; the correction terms account for the
-    // 100-year and 400-year leap rules without branching.
+                                 // Year-of-era from day-of-era; the correction terms account for the
+                                 // 100-year and 400-year leap rules without branching.
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
@@ -547,7 +547,11 @@ mod tests {
                 let dim = days_in_month(year, month);
                 for day in 1..=dim {
                     let z = days_from_civil(year, month, day);
-                    assert_eq!(civil_from_days(z), (year, month, day), "{year}-{month}-{day}");
+                    assert_eq!(
+                        civil_from_days(z),
+                        (year, month, day),
+                        "{year}-{month}-{day}"
+                    );
                 }
             }
         }
@@ -555,7 +559,14 @@ mod tests {
 
     #[test]
     fn extreme_days_round_trip() {
-        for day in [i32::MIN as i64, i32::MAX as i64, -719_468, 0, 719_468, 2_000_000_000] {
+        for day in [
+            i32::MIN as i64,
+            i32::MAX as i64,
+            -719_468,
+            0,
+            719_468,
+            2_000_000_000,
+        ] {
             let (y, m, d) = civil_from_days(day);
             assert_eq!(days_from_civil(y, m, d), day, "day {day}");
         }

@@ -210,7 +210,9 @@ impl TimeOfDay {
         format::parse_time_iso(s)
     }
 
-    /// strftime-style rendering (see [`crate::strftime`]).
+    /// strftime-style rendering, e.g. `t.format("%H:%M:%S%.f")`.
+    ///
+    /// The `%`-directive set is documented on [`crate::Ticks::format`].
     pub fn format(self, fmt: &str) -> Result<String> {
         strftime::format_time(self, fmt)
     }
@@ -281,7 +283,9 @@ mod tests {
         assert_eq!(carry, 2);
         assert_eq!(t2, TimeOfDay::from_hms(0, 30, 0).unwrap());
         assert_eq!(
-            TimeOfDay::from_hms(1, 0, 0).unwrap().duration_since(TimeOfDay::from_hms(0, 30, 0).unwrap()),
+            TimeOfDay::from_hms(1, 0, 0)
+                .unwrap()
+                .duration_since(TimeOfDay::from_hms(0, 30, 0).unwrap()),
             Duration::from_minutes(30)
         );
     }

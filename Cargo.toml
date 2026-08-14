@@ -2,10 +2,12 @@
 name = "tzcraft"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.81"
 authors = ["blueokanna"]
 license = "Apache-2.0"
 description = "A schema-driven date & time library: one 128-bit nanosecond timeline, a const civil calendar, and codec-aware wire formats on nextjson / rustbinary."
 repository = "https://github.com/blueokanna/Tzcraft"
+documentation = "https://docs.rs/tzcraft"
 readme = "README.md"
 keywords = ["date", "time", "datetime", "timezone", "calendar"]
 categories = ["date-and-time"]
@@ -17,8 +19,17 @@ serde = ["dep:nextjson"]
 binary = ["dep:rustbinary", "serde"]
 
 [dependencies]
-nextjson = { version = "0.1.3", features = ["derive"], optional = true }
-rustbinary = { version = "0.1.5-alpha.1", optional = true, features = ["std"] }
+# Both are sibling crates of this project. Exact pins keep builds and the
+# MSRV reproducible: a caret range would let future releases silently raise
+# the MSRV or change wire behaviour that this crate depends on.
+nextjson = { version = "=0.1.3", features = ["derive"], optional = true }
+rustbinary = { version = "=0.1.5-alpha.1", optional = true, features = ["std"] }
+
+[package.metadata.docs.rs]
+# Build every feature on docs.rs and annotate feature-gated items with
+# "Available on crate feature X only" badges.
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [profile.release]
 lto = "thin"

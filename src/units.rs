@@ -8,7 +8,7 @@
 
 use core::fmt;
 
-use crate::calendar::{Weekday, days_from_civil, weekday_from_civil};
+use crate::calendar::{days_from_civil, weekday_from_civil, Weekday};
 use crate::date::Date;
 use crate::error::{Error, Result};
 

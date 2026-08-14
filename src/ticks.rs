@@ -16,7 +16,7 @@ use alloc::string::String;
 use core::fmt;
 use core::str::FromStr;
 
-use crate::calendar::{NS_PER_DAY, NS_PER_SEC, Weekday};
+use crate::calendar::{Weekday, NS_PER_DAY, NS_PER_SEC};
 use crate::date::Date;
 use crate::datetime::CivilDateTime;
 use crate::duration::Duration;
@@ -264,13 +264,7 @@ impl Ticks {
         match self.to_civil_utc() {
             Ok(dt) => {
                 let mut out = alloc::string::String::new();
-                format::format_rfc3339_into(
-                    &mut out,
-                    dt.date(),
-                    dt.time(),
-                    Offset::UTC,
-                    fraction,
-                );
+                format::format_rfc3339_into(&mut out, dt.date(), dt.time(), Offset::UTC, fraction);
                 out
             }
             Err(_) => alloc::format!("{}s", self.0),
@@ -288,8 +282,12 @@ impl Ticks {
         utc.checked_sub(Duration::from_seconds(offset.as_seconds() as i64))
     }
 
-    /// strftime-style rendering (see [`crate::strftime`]); the civil parts
-    /// are UTC and the offset designator is `Z`.
+    /// strftime-style rendering, e.g. `t.format("%Y-%m-%d %H:%M:%S %z")`.
+    ///
+    /// The civil parts are UTC and the offset designator is `Z`. Supported
+    /// directives: `%Y %y %C %m %d %e %j %H %I %k %l %M %S %f %.f %.3f %p
+    /// %P %a %A %b %h %B %G %g %V %u %w %U %W %z %:z %Z %s %F %D %x %R %T
+    /// %X %r %+ %n %t %%`, plus the `%-`/`%_`/`%0` padding modifiers.
     pub fn format(self, fmt: &str) -> Result<String> {
         strftime::format_ticks(self, fmt)
     }
@@ -357,7 +355,10 @@ mod tests {
 
     #[test]
     fn sub_seconds_floor() {
-        let t = Ticks::from_unix_seconds(0, 0).unwrap().checked_sub(Duration::from_nanos(1)).unwrap();
+        let t = Ticks::from_unix_seconds(0, 0)
+            .unwrap()
+            .checked_sub(Duration::from_nanos(1))
+            .unwrap();
         assert_eq!(t.to_unix_seconds().unwrap(), (-1, 999_999_999));
         let (y, m, d) = t.to_civil_utc().unwrap().date().parts();
         assert_eq!((y, m, d), (1969, 12, 31));
@@ -370,11 +371,16 @@ mod tests {
         assert_eq!(feb.to_rfc3339(FractionDigits::None), "2023-02-28T12:00:00Z");
         let leap = Ticks::from_rfc3339("2024-01-31T12:00:00Z").unwrap();
         assert_eq!(
-            leap.checked_add_months(Months::new(1)).unwrap().to_rfc3339(FractionDigits::None),
+            leap.checked_add_months(Months::new(1))
+                .unwrap()
+                .to_rfc3339(FractionDigits::None),
             "2024-02-29T12:00:00Z"
         );
         assert_eq!(
-            jan31.checked_add_years(2).unwrap().to_rfc3339(FractionDigits::None),
+            jan31
+                .checked_add_years(2)
+                .unwrap()
+                .to_rfc3339(FractionDigits::None),
             "2025-01-31T12:00:00Z"
         );
     }
@@ -397,7 +403,9 @@ mod tests {
         );
         assert_eq!(Ticks::from_timestamp_nanos(1_700_000_000_123_456_789), t);
         // Pre-epoch flooring: -0.5 s is timestamp -1, matching Unix time.
-        let before = Ticks::EPOCH.checked_sub(Duration::from_millis(500)).unwrap();
+        let before = Ticks::EPOCH
+            .checked_sub(Duration::from_millis(500))
+            .unwrap();
         assert_eq!(before.timestamp().unwrap(), -1);
         assert!(Ticks::from_timestamp(0, 1_000_000_000).is_err());
     }
@@ -419,11 +427,19 @@ mod tests {
             let t = Ticks::from_rfc3339(s).unwrap_or_else(|e| panic!("{s}: {e}"));
             // A UTC instant re-renders with 'Z'; reconstruct the local form.
             let (date, time, off) = format::parse_rfc3339(s).unwrap();
-            let shifted = t.checked_add(Duration::from_seconds(off.as_seconds() as i64)).unwrap();
+            let shifted = t
+                .checked_add(Duration::from_seconds(off.as_seconds() as i64))
+                .unwrap();
             let mut expect = alloc::string::String::new();
             format::format_rfc3339_into(&mut expect, date, time, off, FractionDigits::Auto);
             let mut got = alloc::string::String::new();
-            format::format_rfc3339_into(&mut got, shifted.to_civil_utc().unwrap().date(), shifted.to_civil_utc().unwrap().time(), off, FractionDigits::Auto);
+            format::format_rfc3339_into(
+                &mut got,
+                shifted.to_civil_utc().unwrap().date(),
+                shifted.to_civil_utc().unwrap().time(),
+                off,
+                FractionDigits::Auto,
+            );
             assert_eq!(got, expect, "{s}");
         }
     }

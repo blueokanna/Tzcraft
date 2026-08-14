@@ -184,7 +184,8 @@ impl CivilDateTime {
 
     /// The signed duration between `earlier` and `self`.
     pub fn signed_duration_since(self, earlier: CivilDateTime) -> Duration {
-        let day_ns = (self.date.days_since_epoch() as i128 - earlier.date.days_since_epoch() as i128)
+        let day_ns = (self.date.days_since_epoch() as i128
+            - earlier.date.days_since_epoch() as i128)
             * NS_PER_DAY;
         let time_ns =
             self.time.nanos_since_midnight() as i128 - earlier.time.nanos_since_midnight() as i128;
@@ -193,12 +194,18 @@ impl CivilDateTime {
 
     /// Checked day offset; the time part is preserved.
     pub fn checked_add_days(self, days: Days) -> Result<CivilDateTime> {
-        Ok(CivilDateTime::new(self.date.checked_add_days(days)?, self.time))
+        Ok(CivilDateTime::new(
+            self.date.checked_add_days(days)?,
+            self.time,
+        ))
     }
 
     /// Checked day offset in the negative direction.
     pub fn checked_sub_days(self, days: Days) -> Result<CivilDateTime> {
-        Ok(CivilDateTime::new(self.date.checked_sub_days(days)?, self.time))
+        Ok(CivilDateTime::new(
+            self.date.checked_sub_days(days)?,
+            self.time,
+        ))
     }
 
     /// Saturating duration addition.
@@ -217,12 +224,18 @@ impl CivilDateTime {
 
     /// Calendar-aware month stepping; the time part is preserved.
     pub fn checked_add_months(self, months: Months) -> Result<CivilDateTime> {
-        Ok(CivilDateTime::new(self.date.checked_add_months(months)?, self.time))
+        Ok(CivilDateTime::new(
+            self.date.checked_add_months(months)?,
+            self.time,
+        ))
     }
 
     /// Calendar-aware month stepping in the negative direction.
     pub fn checked_sub_months(self, months: Months) -> Result<CivilDateTime> {
-        Ok(CivilDateTime::new(self.date.checked_sub_months(months)?, self.time))
+        Ok(CivilDateTime::new(
+            self.date.checked_sub_months(months)?,
+            self.time,
+        ))
     }
 
     /// Calendar-aware year stepping.
@@ -255,17 +268,26 @@ impl CivilDateTime {
 
     /// Replace the minute.
     pub fn with_minute(self, minute: u32) -> Result<CivilDateTime> {
-        Ok(CivilDateTime::new(self.date, self.time.with_minute(minute)?))
+        Ok(CivilDateTime::new(
+            self.date,
+            self.time.with_minute(minute)?,
+        ))
     }
 
     /// Replace the second.
     pub fn with_second(self, second: u32) -> Result<CivilDateTime> {
-        Ok(CivilDateTime::new(self.date, self.time.with_second(second)?))
+        Ok(CivilDateTime::new(
+            self.date,
+            self.time.with_second(second)?,
+        ))
     }
 
     /// Replace the nanosecond within the second.
     pub fn with_nanosecond(self, nano: u32) -> Result<CivilDateTime> {
-        Ok(CivilDateTime::new(self.date, self.time.with_nanosecond(nano)?))
+        Ok(CivilDateTime::new(
+            self.date,
+            self.time.with_nanosecond(nano)?,
+        ))
     }
 
     /// Build from a Unix timestamp (chrono's `from_timestamp_opt`).
@@ -301,7 +323,10 @@ impl CivilDateTime {
         Ok(CivilDateTime::new(date, time))
     }
 
-    /// strftime-style rendering (see [`crate::strftime`]).
+    /// strftime-style rendering, e.g. `dt.format("%Y-%m-%d %H:%M:%S")`.
+    ///
+    /// The `%`-directive set (with `%-`/`%_`/`%0` padding modifiers) is
+    /// documented on [`crate::Ticks::format`].
     pub fn format(self, fmt: &str) -> Result<String> {
         strftime::format_civil(self, fmt)
     }

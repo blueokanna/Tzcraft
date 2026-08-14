@@ -12,9 +12,9 @@ use core::fmt;
 use core::str::FromStr;
 
 use crate::calendar::{
-    Month, Weekday, civil_from_days, day_of_year, days_from_civil, days_in_month, days_in_year,
-    floor_div, floor_mod, is_leap_year, iso_week_from_civil, weekday_from_civil, DAYS_0001_TO_1970,
-    NS_PER_DAY,
+    civil_from_days, day_of_year, days_from_civil, days_in_month, days_in_year, floor_div,
+    floor_mod, is_leap_year, iso_week_from_civil, weekday_from_civil, Month, Weekday,
+    DAYS_0001_TO_1970, NS_PER_DAY,
 };
 use crate::datetime::CivilDateTime;
 use crate::duration::Duration;
@@ -192,7 +192,10 @@ impl Date {
 
     /// Attach an hour/minute/second.
     pub fn and_hms(self, hour: u32, minute: u32, second: u32) -> Result<CivilDateTime> {
-        Ok(CivilDateTime::new(self, TimeOfDay::from_hms(hour, minute, second)?))
+        Ok(CivilDateTime::new(
+            self,
+            TimeOfDay::from_hms(hour, minute, second)?,
+        ))
     }
 
     /// Attach an hour/minute/second/millisecond.
@@ -455,8 +458,14 @@ mod tests {
     fn with_component_builders() {
         let d = Date::from_ymd(2024, 2, 29).unwrap();
         assert!(d.with_year(2023).is_err()); // Feb 29 does not exist in 2023
-        assert_eq!(d.with_year(2028).unwrap(), Date::from_ymd(2028, 2, 29).unwrap());
-        assert_eq!(d.with_month(3).unwrap(), Date::from_ymd(2024, 3, 29).unwrap());
+        assert_eq!(
+            d.with_year(2028).unwrap(),
+            Date::from_ymd(2028, 2, 29).unwrap()
+        );
+        assert_eq!(
+            d.with_month(3).unwrap(),
+            Date::from_ymd(2024, 3, 29).unwrap()
+        );
         assert_eq!(d.with_day(1).unwrap(), Date::from_ymd(2024, 2, 1).unwrap());
         assert!(d.with_day(30).is_err());
     }
@@ -502,7 +511,10 @@ mod tests {
     #[test]
     fn signed_duration_math() {
         let d = Date::from_ymd(2024, 1, 1).unwrap();
-        assert_eq!(d.signed_duration_since(Date::from_ymd(2023, 12, 31).unwrap()), Duration::from_days(1));
+        assert_eq!(
+            d.signed_duration_since(Date::from_ymd(2023, 12, 31).unwrap()),
+            Duration::from_days(1)
+        );
         assert_eq!(
             d.checked_add_signed(Duration::from_days(10)).unwrap(),
             Date::from_ymd(2024, 1, 11).unwrap()
@@ -524,13 +536,13 @@ mod tests {
         assert_eq!(d.format("%e %-d").unwrap(), "29 29");
         assert!(d.format("%Q").is_err());
         assert_eq!(Date::parse_from_str("2024-02-29", "%Y-%m-%d").unwrap(), d);
-        assert_eq!(Date::parse_from_str("Thu Feb 29 2024", "%a %b %d %Y").unwrap(), d);
-        assert_eq!(Date::parse_from_str("29.02.2024", "%d.%m.%Y").unwrap(), d);
-        assert_eq!(Date::parse_from_str("24-060", "%y-%j").unwrap(), d);
         assert_eq!(
-            Date::parse_from_str("2024-W09-4", "%G-W%V-%u").unwrap(),
+            Date::parse_from_str("Thu Feb 29 2024", "%a %b %d %Y").unwrap(),
             d
         );
+        assert_eq!(Date::parse_from_str("29.02.2024", "%d.%m.%Y").unwrap(), d);
+        assert_eq!(Date::parse_from_str("24-060", "%y-%j").unwrap(), d);
+        assert_eq!(Date::parse_from_str("2024-W09-4", "%G-W%V-%u").unwrap(), d);
         assert!(Date::parse_from_str("2024-02-30", "%Y-%m-%d").is_err());
         assert!(Date::parse_from_str("Mon Feb 29 2024", "%a %b %d %Y").is_err());
     }
@@ -538,10 +550,19 @@ mod tests {
     #[test]
     fn occurrence_math() {
         let d = Date::from_ymd(2024, 1, 1).unwrap(); // Monday
-        assert_eq!(d.next_occurrence(Weekday::Monday).unwrap(), Date::from_ymd(2024, 1, 8).unwrap());
+        assert_eq!(
+            d.next_occurrence(Weekday::Monday).unwrap(),
+            Date::from_ymd(2024, 1, 8).unwrap()
+        );
         assert_eq!(d.next_or_same(Weekday::Monday).unwrap(), d);
-        assert_eq!(d.previous_occurrence(Weekday::Monday).unwrap(), Date::from_ymd(2023, 12, 25).unwrap());
-        assert_eq!(d.next_occurrence(Weekday::Friday).unwrap(), Date::from_ymd(2024, 1, 5).unwrap());
+        assert_eq!(
+            d.previous_occurrence(Weekday::Monday).unwrap(),
+            Date::from_ymd(2023, 12, 25).unwrap()
+        );
+        assert_eq!(
+            d.next_occurrence(Weekday::Friday).unwrap(),
+            Date::from_ymd(2024, 1, 5).unwrap()
+        );
         assert_eq!(d.previous_or_same(Weekday::Monday).unwrap(), d);
     }
 
@@ -554,7 +575,13 @@ mod tests {
 
     #[test]
     fn iso_round_trips() {
-        for s in ["1970-01-01", "2024-02-29", "0000-01-01", "9999-12-31", "-0001-12-31"] {
+        for s in [
+            "1970-01-01",
+            "2024-02-29",
+            "0000-01-01",
+            "9999-12-31",
+            "-0001-12-31",
+        ] {
             let d = Date::from_iso(s).unwrap_or_else(|e| panic!("{s}: {e}"));
             assert_eq!(d.to_iso(), s, "{s}");
         }

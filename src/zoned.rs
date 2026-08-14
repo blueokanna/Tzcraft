@@ -51,7 +51,10 @@ impl Zoned {
     pub fn from_civil(civil: CivilDateTime, zone: Zone) -> Result<Zoned> {
         let utc = civil.to_ticks_utc()?;
         let shifted = utc.checked_sub(Duration::from_seconds(zone.offset().as_seconds() as i64))?;
-        Ok(Zoned { ticks: shifted, zone })
+        Ok(Zoned {
+            ticks: shifted,
+            zone,
+        })
     }
 
     /// The underlying UTC instant.
@@ -76,8 +79,9 @@ impl Zoned {
 
     /// The local civil reading (date + time) through this zone.
     pub fn civil(self) -> Result<CivilDateTime> {
-        let shifted =
-            self.ticks.checked_add(Duration::from_seconds(self.offset().as_seconds() as i64))?;
+        let shifted = self
+            .ticks
+            .checked_add(Duration::from_seconds(self.offset().as_seconds() as i64))?;
         shifted.to_civil_utc()
     }
 
@@ -93,7 +97,10 @@ impl Zoned {
 
     /// Checked duration addition on the instant.
     pub fn checked_add(self, delta: Duration) -> Result<Zoned> {
-        Ok(Zoned { ticks: self.ticks.checked_add(delta)?, zone: self.zone })
+        Ok(Zoned {
+            ticks: self.ticks.checked_add(delta)?,
+            zone: self.zone,
+        })
     }
 
     /// Checked duration subtraction on the instant.
@@ -118,13 +125,15 @@ impl Zoned {
 
     /// Checked day offset on the instant.
     pub fn checked_add_days(self, days: Days) -> Result<Zoned> {
-        let days = i64::try_from(days.get()).map_err(|_| crate::error::Error::out_of_range("days"))?;
+        let days =
+            i64::try_from(days.get()).map_err(|_| crate::error::Error::out_of_range("days"))?;
         self.checked_add(Duration::from_days(days))
     }
 
     /// Checked day offset in the negative direction.
     pub fn checked_sub_days(self, days: Days) -> Result<Zoned> {
-        let days = i64::try_from(days.get()).map_err(|_| crate::error::Error::out_of_range("days"))?;
+        let days =
+            i64::try_from(days.get()).map_err(|_| crate::error::Error::out_of_range("days"))?;
         self.checked_sub(Duration::from_days(days))
     }
 
@@ -180,7 +189,10 @@ impl Zoned {
 
     /// Re-read the same instant through a different zone.
     pub fn with_zone(self, zone: Zone) -> Zoned {
-        Zoned { ticks: self.ticks, zone }
+        Zoned {
+            ticks: self.ticks,
+            zone,
+        }
     }
 
     /// RFC 3339 rendering with the local offset designator.
@@ -210,7 +222,10 @@ impl Zoned {
         Zoned::from_civil(CivilDateTime::new(date, time), Zone::fixed(offset))
     }
 
-    /// strftime-style rendering in local time (see [`crate::strftime`]).
+    /// strftime-style rendering in local time, e.g.
+    /// `z.format("%Y-%m-%d %H:%M:%S %:z")`.
+    ///
+    /// The `%`-directive set is documented on [`crate::Ticks::format`].
     pub fn format(self, fmt: &str) -> Result<String> {
         strftime::format_zoned(self, fmt)
     }
@@ -261,7 +276,10 @@ mod tests {
         let civil = CivilDateTime::from_ymd_hms(2024, 6, 15, 12, 0, 0).unwrap();
         let zoned = Zoned::from_civil(civil, zone).unwrap();
         // 12:00 +08:00 == 04:00 UTC.
-        assert_eq!(zoned.to_utc().to_rfc3339(FractionDigits::None), "2024-06-15T04:00:00Z");
+        assert_eq!(
+            zoned.to_utc().to_rfc3339(FractionDigits::None),
+            "2024-06-15T04:00:00Z"
+        );
         assert_eq!(zoned.civil().unwrap(), civil);
         assert_eq!(zoned.date().unwrap(), civil.date());
         assert_eq!(zoned.time().unwrap(), civil.time());
@@ -270,11 +288,20 @@ mod tests {
     #[test]
     fn zone_aware_month_math() {
         let zone = Zone::fixed(Offset::from_hms(-5, 0, 0).unwrap());
-        let zoned = Zoned::from_civil(CivilDateTime::from_ymd_hms(2024, 1, 31, 12, 0, 0).unwrap(), zone).unwrap();
+        let zoned = Zoned::from_civil(
+            CivilDateTime::from_ymd_hms(2024, 1, 31, 12, 0, 0).unwrap(),
+            zone,
+        )
+        .unwrap();
         let next = zoned.checked_add_months(Months::new(1)).unwrap();
         assert_eq!(next.civil().unwrap().to_iso(), "2024-02-29T12:00:00");
         assert_eq!(
-            zoned.checked_sub_months(Months::new(1)).unwrap().civil().unwrap().to_iso(),
+            zoned
+                .checked_sub_months(Months::new(1))
+                .unwrap()
+                .civil()
+                .unwrap()
+                .to_iso(),
             "2023-12-31T12:00:00"
         );
     }
@@ -282,13 +309,25 @@ mod tests {
     #[test]
     fn strftime_round_trips() {
         let z = Zoned::from_rfc3339("2024-06-15T07:00:00+08:00").unwrap();
-        assert_eq!(z.format("%Y-%m-%d %H:%M:%S %z").unwrap(), "2024-06-15 07:00:00 +0800");
-        assert_eq!(z.format("%A %e %B %Y %I:%M %p").unwrap(), "Saturday 15 June 2024 07:00 AM");
+        assert_eq!(
+            z.format("%Y-%m-%d %H:%M:%S %z").unwrap(),
+            "2024-06-15 07:00:00 +0800"
+        );
+        assert_eq!(
+            z.format("%A %e %B %Y %I:%M %p").unwrap(),
+            "Saturday 15 June 2024 07:00 AM"
+        );
         assert_eq!(
             Zoned::parse_from_str("2024-06-15 07:00:00 +0800", "%Y-%m-%d %H:%M:%S %z").unwrap(),
             z
         );
-        assert_eq!(z.timestamp().unwrap(), Ticks::from_rfc3339("2024-06-14T23:00:00Z").unwrap().timestamp().unwrap());
+        assert_eq!(
+            z.timestamp().unwrap(),
+            Ticks::from_rfc3339("2024-06-14T23:00:00Z")
+                .unwrap()
+                .timestamp()
+                .unwrap()
+        );
     }
 
     #[test]

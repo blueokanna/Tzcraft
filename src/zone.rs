@@ -11,7 +11,7 @@
 //!
 //! ```
 //! # use tzcraft::{Offset, Zone};
-//! const TOKYO: Zone = Zone::fixed(Offset::from_seconds_opt(9 * 3600).unwrap());
+//! const TOKYO: Zone = Zone::fixed(Offset::east(9 * 3600));
 //! ```
 //!
 //! If a wall clock must follow actual daylight-saving rules, resolve the

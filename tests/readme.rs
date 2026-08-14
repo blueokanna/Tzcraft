@@ -1,7 +1,10 @@
 //! Verifies that the code snippets shown in the README compile and run —
 //! documentation that rots is documentation that lies.
+//!
+//! The quick-start example returns `Box<dyn std::error::Error>`, so this
+//! suite needs the `std` feature in addition to both codecs.
 
-#![cfg(all(feature = "serde", feature = "binary"))]
+#![cfg(all(feature = "std", feature = "serde", feature = "binary"))]
 
 use tzcraft::{Date, Duration, Months, Offset, Ticks, Weekday, Zone, Zoned};
 
@@ -18,8 +21,14 @@ fn readme_quick_start() -> Result<(), Box<dyn std::error::Error>> {
 
     // 日历感知的月份运算会钳制日期，而不是溢出。
     let jan = Date::from_ymd(2023, 1, 31)?;
-    assert_eq!(jan.checked_add_months(Months::new(1))?, Date::from_ymd(2023, 2, 28)?);
-    assert_eq!(jan.checked_add_months(Months::new(13))?, Date::from_ymd(2024, 2, 29)?); // 闰年
+    assert_eq!(
+        jan.checked_add_months(Months::new(1))?,
+        Date::from_ymd(2023, 2, 28)?
+    );
+    assert_eq!(
+        jan.checked_add_months(Months::new(13))?,
+        Date::from_ymd(2024, 2, 29)?
+    ); // 闰年
 
     // 时长带符号，ISO 8601 严格往返。
     let span = Duration::from_iso8601("P1DT2H3M4.5S")?;
@@ -45,7 +54,7 @@ fn readme_const_calendar() {
 
 #[test]
 fn readme_custom_zone_const() {
-    const TOKYO: Zone = Zone::fixed(Offset::from_seconds_opt(9 * 3600).unwrap());
+    const TOKYO: Zone = Zone::fixed(Offset::east(9 * 3600));
     assert_eq!(TOKYO.offset().as_seconds(), 9 * 3600);
 }
 

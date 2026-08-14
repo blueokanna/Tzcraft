@@ -118,6 +118,10 @@
 #![no_std]
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
+#![doc(html_root_url = "https://docs.rs/tzcraft")]
+// `doc_auto_cfg` adds "Available on crate feature ..." badges on docs.rs
+// (nightly); on stable it is inert.
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 extern crate alloc;
 #[cfg(feature = "std")]
