@@ -1,0 +1,29 @@
+[package]
+name = "tzcraft"
+version = "0.1.0"
+edition = "2021"
+authors = ["blueokanna"]
+license = "Apache-2.0"
+description = "A schema-driven date & time library: one 128-bit nanosecond timeline, a const civil calendar, and codec-aware wire formats on nextjson / rustbinary."
+repository = "https://github.com/blueokanna/Tzcraft"
+readme = "README.md"
+keywords = ["date", "time", "datetime", "timezone", "calendar"]
+categories = ["date-and-time"]
+
+[features]
+default = ["std", "serde", "binary"]
+std = []
+serde = ["dep:nextjson"]
+binary = ["dep:rustbinary", "serde"]
+
+[dependencies]
+nextjson = { version = "0.1.3", features = ["derive"], optional = true }
+rustbinary = { version = "0.1.5-alpha.1", optional = true, features = ["std"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
