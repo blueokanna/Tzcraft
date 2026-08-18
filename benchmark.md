@@ -1,7 +1,7 @@
 # tzcraft benchmark report
 
-- date: 2026-08-18T06:12:27Z
-- commit: 18d903d
+- date: 2026-08-18T06:26:48Z
+- commit: 2894152
 - runner: Linux 6.17.0-1022-azure x86_64
 
 - target: `x86_64-linux`
@@ -12,15 +12,15 @@
 
 | operation | tzcraft | chrono | time | jiff | tzcraft vs fastest |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| parse RFC 3339 (Z) | 29.2 | 124.4 | 21.3 | 56.4 | 1.37× |
-| parse RFC 3339 (+08:00) | 36.4 | 27.8 | 22.7 | 60.5 | 1.60× |
-| format RFC 3339 (String) | 59.3 | 65.0 | 18.7 | 48.7 | 3.17× |
-| format RFC 3339 (stack buffer) | 44.1 | — | — | — | **fastest** |
-| instant → civil (y/m/d/h) | 18.6 | 2.1 | 4.0 | 4.9 | 8.97× |
-| date + 1 day | 0.5 | 2.0 | 1.0 | 3.8 | **fastest** |
-| date + 1 month (clamping) | 24.1 | 7.8 | — | 17.0 | 3.10× |
-| duration + 90 s | 1.0 | 2.2 | 2.0 | 35.0 | **fastest** |
-| weekday | 1.8 | 1.0 | 4.4 | 2.7 | 1.76× |
+| parse RFC 3339 (Z) | 35.8 | 175.2 | 23.7 | 67.3 | 1.51× |
+| parse RFC 3339 (+08:00) | 44.2 | 34.1 | 27.3 | 70.9 | 1.62× |
+| format RFC 3339 (String) | 73.1 | 84.7 | 25.2 | 63.3 | 2.91× |
+| format RFC 3339 (stack buffer) | 52.1 | — | — | — | **fastest** |
+| instant → civil (y/m/d/h) | 19.0 | 2.5 | 4.3 | 5.4 | 7.59× |
+| date + 1 day | 0.6 | 2.3 | 1.2 | 5.0 | **fastest** |
+| date + 1 month (clamping) | 25.9 | 9.1 | — | 21.4 | 2.83× |
+| duration + 90 s | 1.2 | 2.5 | 2.2 | 40.6 | **fastest** |
+| weekday | 2.1 | 1.2 | 5.0 | 3.2 | 1.81× |
 
 > Methodology: fixed identical inputs for parse/format; pre-built varied input arrays (indexed in a rotating loop) for the arithmetic/civil operations so loop-invariant code motion cannot fold them; `black_box` on inputs and outputs; 10k warm-up; minimum of 3 runs of a large fixed iteration count. Numbers are machine-specific (CI: `ubuntu-latest`) and only comparable within a single run.
 > `time` 0.3's `Date` has no month arithmetic (its `Duration` is day-precision only), so that cell is not applicable.
