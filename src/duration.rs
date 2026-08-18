@@ -5,13 +5,18 @@
 //! kind of thing, and the type system should not let you add two instants.
 //! Internally both are `i128` nanoseconds, so conversions are free.
 
-use alloc::string::String;
 use core::fmt;
 use core::str::FromStr;
 
-use crate::calendar::{NS_PER_DAY, NS_PER_HOUR, NS_PER_MIN, NS_PER_SEC};
+use crate::calendar::{
+    floor_div_ns, floor_rem_ns, NS_PER_DAY, NS_PER_HOUR, NS_PER_MIN, NS_PER_SEC,
+};
 use crate::error::{Error, Result};
 use crate::format;
+use crate::write::FmtSink;
+
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 
 /// A signed nanosecond duration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -27,11 +32,21 @@ impl Duration {
     }
 
     /// Build from microseconds.
+    ///
+    /// `micros` must be small enough that `micros * 1_000` fits the `i128`
+    /// nanosecond range (|micros| < 1.7×10^35); the multiplication is the
+    /// unchecked const arithmetic shared by every `const fn` constructor.
     pub const fn from_micros(micros: i128) -> Duration {
         Duration(micros * 1_000)
     }
 
     /// Build from milliseconds.
+    ///
+    /// `millis` must be small enough that `millis * 1_000_000` fits the
+    /// `i128` nanosecond range (|millis| < 1.7×10^29); the multiplication is
+    /// the unchecked const arithmetic shared by every `const fn`
+    /// constructor. This mirrors the behaviour of `chrono`/`time`, whose
+    /// unit-scaled constructors also assume an in-range argument.
     pub const fn from_millis(millis: i128) -> Duration {
         Duration(millis * 1_000_000)
     }
@@ -105,6 +120,7 @@ impl Duration {
     }
 
     /// Raw nanoseconds (signed).
+    #[inline]
     pub const fn as_nanos(self) -> i128 {
         self.0
     }
@@ -286,8 +302,8 @@ impl Duration {
         if self.0 < 0 {
             return Err(Error::invalid("negative duration"));
         }
-        let secs = self.0.div_euclid(NS_PER_SEC);
-        let nanos = self.0.rem_euclid(NS_PER_SEC);
+        let secs = floor_div_ns(self.0, NS_PER_SEC);
+        let nanos = floor_rem_ns(self.0, NS_PER_SEC);
         let secs = u64::try_from(secs).map_err(|_| Error::out_of_range("duration"))?;
         Ok(core::time::Duration::new(secs, nanos as u32))
     }
@@ -296,8 +312,21 @@ impl Duration {
     ///
     /// Year and month components are never produced because their lengths are
     /// calendar-dependent and therefore not a property of a fixed span.
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`Duration::write_iso8601`].
+    #[cfg(feature = "alloc")]
     pub fn to_iso8601(self) -> String {
         format::format_duration_iso(self)
+    }
+
+    /// ISO 8601 duration rendering into a caller-owned buffer
+    /// (allocator-free).
+    ///
+    /// Returns the number of bytes written; a 64-byte buffer is always large
+    /// enough.
+    pub fn write_iso8601(self, out: &mut [u8]) -> Result<usize> {
+        format::write_duration_iso(out, self)
     }
 
     /// Parse an ISO 8601 duration.
@@ -312,7 +341,8 @@ impl Duration {
 
 impl fmt::Display for Duration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_iso8601())
+        let mut sink = FmtSink(f);
+        format::format_duration_iso_into(&mut sink, *self).map_err(|_| fmt::Error)
     }
 }
 
@@ -376,6 +406,7 @@ mod tests {
         assert!(Duration::from_nanos(-1).to_std().is_err());
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn iso_round_trips() {
         // Canonical texts that render identically.

@@ -7,7 +7,6 @@
 //! own beyond the calendar-aware month/year stepping; day stepping is a
 //! simple `i32` offset because a civil day is exactly one day.
 
-use alloc::string::String;
 use core::fmt;
 use core::str::FromStr;
 
@@ -25,6 +24,10 @@ use crate::strftime;
 use crate::ticks::Ticks;
 use crate::time::TimeOfDay;
 use crate::units::{Days, IsoWeek, Months};
+use crate::write::{with_buf, FmtSink};
+
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 
 /// A civil date in the proleptic Gregorian calendar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -103,21 +106,25 @@ impl Date {
     }
 
     /// `(year, month, day)` components.
+    #[inline]
     pub const fn parts(self) -> (i32, u32, u32) {
         civil_from_days(self.0 as i64)
     }
 
     /// Calendar year.
+    #[inline]
     pub const fn year(self) -> i32 {
         self.parts().0
     }
 
     /// Month as a 1-based number.
+    #[inline]
     pub const fn month(self) -> u32 {
         self.parts().1
     }
 
     /// Day of month.
+    #[inline]
     pub const fn day(self) -> u32 {
         self.parts().2
     }
@@ -128,6 +135,7 @@ impl Date {
     }
 
     /// Weekday.
+    #[inline]
     pub const fn weekday(self) -> Weekday {
         weekday_from_civil(self.0 as i64)
     }
@@ -382,14 +390,36 @@ impl Date {
     }
 
     /// Strict ISO 8601 rendering (`YYYY-MM-DD`, expanded-year sign as needed).
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`Date::write_iso`].
+    #[cfg(feature = "alloc")]
     pub fn to_iso(self) -> String {
         format::format_date(self)
     }
 
+    /// Strict ISO 8601 rendering into a caller-owned buffer (allocator-free).
+    ///
+    /// Returns the number of bytes written; a 16-byte buffer is always large
+    /// enough.
+    pub fn write_iso(self, out: &mut [u8]) -> Result<usize> {
+        let (y, m, d) = self.parts();
+        with_buf(out, |b| format::format_date_into(b, y, m, d))
+    }
+
     /// strftime-style rendering; unknown directives are an error (unlike
     /// `chrono`, which silently drops them).
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`Date::write_format`].
+    #[cfg(feature = "alloc")]
     pub fn format(self, fmt: &str) -> Result<String> {
         strftime::format_date(self, fmt)
+    }
+
+    /// strftime-style rendering into a caller-owned buffer (allocator-free).
+    pub fn write_format(self, fmt: &str, out: &mut [u8]) -> Result<usize> {
+        strftime::write_date(self, fmt, out)
     }
 
     /// Parse with a strftime-style format string (chrono's
@@ -401,7 +431,9 @@ impl Date {
 
 impl fmt::Display for Date {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_iso())
+        let (y, m, d) = self.parts();
+        let mut sink = FmtSink(f);
+        format::format_date_into(&mut sink, y, m, d).map_err(|_| fmt::Error)
     }
 }
 
@@ -525,6 +557,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn strftime_round_trips() {
         let d = Date::from_ymd(2024, 2, 29).unwrap();
@@ -573,6 +606,7 @@ mod tests {
         assert_eq!(d.last_day_of_month(), Date::from_ymd(2024, 2, 29).unwrap());
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn iso_round_trips() {
         for s in [

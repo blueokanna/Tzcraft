@@ -8,11 +8,10 @@
 //! timeline (day count × nanoseconds-per-day + nanoseconds-of-day), which
 //! makes cross-midnight and cross-year carries a non-event.
 
-use alloc::string::String;
 use core::fmt;
 use core::str::FromStr;
 
-use crate::calendar::{Month, Weekday, NS_PER_DAY};
+use crate::calendar::{ns_divmod_day, Month, Weekday, NS_PER_DAY};
 use crate::date::Date;
 use crate::duration::Duration;
 use crate::error::{Error, Result};
@@ -21,6 +20,10 @@ use crate::strftime;
 use crate::ticks::Ticks;
 use crate::time::TimeOfDay;
 use crate::units::{Days, Months};
+use crate::write::{with_buf, FmtSink, Write};
+
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 
 /// A calendar date and time without a timezone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -83,11 +86,13 @@ impl CivilDateTime {
     }
 
     /// The date part.
+    #[inline]
     pub const fn date(self) -> Date {
         self.date
     }
 
     /// The time-of-day part.
+    #[inline]
     pub const fn time(self) -> TimeOfDay {
         self.time
     }
@@ -159,8 +164,7 @@ impl CivilDateTime {
             .checked_add(self.time.nanos_since_midnight() as i128)
             .and_then(|t| t.checked_add(delta.as_nanos()))
             .ok_or_else(Error::overflow)?;
-        let days = total.div_euclid(NS_PER_DAY);
-        let rem = total.rem_euclid(NS_PER_DAY);
+        let (days, rem) = ns_divmod_day(total);
         let days = i64::try_from(days).map_err(|_| Error::out_of_range("date"))?;
         let date = Date::from_days_checked(days)?;
         let time = TimeOfDay::from_nanos_since_midnight(rem as u64)?;
@@ -313,8 +317,25 @@ impl CivilDateTime {
     }
 
     /// Strict ISO 8601 rendering (`YYYY-MM-DDTHH:MM:SS[.fffffffff]`).
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`CivilDateTime::write_iso`].
+    #[cfg(feature = "alloc")]
     pub fn to_iso(self) -> String {
         format::format_civil(self, FractionDigits::Auto)
+    }
+
+    /// Strict ISO 8601 rendering into a caller-owned buffer (allocator-free).
+    ///
+    /// Returns the number of bytes written; a 32-byte buffer is always large
+    /// enough.
+    pub fn write_iso(self, out: &mut [u8]) -> Result<usize> {
+        with_buf(out, |b| {
+            format::format_date_into(b, self.year(), self.month(), self.day())?;
+            b.write_byte(b'T')?;
+            let (h, mi, s, ns) = self.time().parts();
+            format::format_time_into(b, h, mi, s, ns, FractionDigits::Auto)
+        })
     }
 
     /// Parse a strict ISO 8601 local date-time (no zone designator).
@@ -327,8 +348,17 @@ impl CivilDateTime {
     ///
     /// The `%`-directive set (with `%-`/`%_`/`%0` padding modifiers) is
     /// documented on [`crate::Ticks::format`].
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`CivilDateTime::write_format`].
+    #[cfg(feature = "alloc")]
     pub fn format(self, fmt: &str) -> Result<String> {
         strftime::format_civil(self, fmt)
+    }
+
+    /// strftime-style rendering into a caller-owned buffer (allocator-free).
+    pub fn write_format(self, fmt: &str, out: &mut [u8]) -> Result<usize> {
+        strftime::write_civil(self, fmt, out)
     }
 
     /// Parse with a strftime-style format string (chrono's
@@ -340,7 +370,14 @@ impl CivilDateTime {
 
 impl fmt::Display for CivilDateTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_iso())
+        let mut sink = FmtSink(f);
+        format::format_date_into(&mut sink, self.year(), self.month(), self.day())
+            .and_then(|()| {
+                sink.write_byte(b'T')?;
+                let (h, mi, s, ns) = self.time().parts();
+                format::format_time_into(&mut sink, h, mi, s, ns, FractionDigits::Auto)
+            })
+            .map_err(|_| fmt::Error)
     }
 }
 
@@ -373,6 +410,7 @@ mod tests {
         assert_eq!(back, dt);
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn arithmetic_carries_across_days() {
         let dt = CivilDateTime::from_ymd_hms(2024, 12, 31, 23, 59, 59).unwrap();
@@ -382,6 +420,7 @@ mod tests {
         assert_eq!(back.to_iso(), "2024-12-31T23:59:57");
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn months_keep_time() {
         let dt = CivilDateTime::from_ymd_hms(2024, 1, 31, 12, 30, 0).unwrap();
@@ -390,6 +429,7 @@ mod tests {
         assert_eq!(next.time(), TimeOfDay::from_hms(12, 30, 0).unwrap());
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn iso_round_trips() {
         for s in [

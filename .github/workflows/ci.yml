@@ -3,6 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+    # The benchmark job commits `benchmark.md` back; do not re-run the whole
+    # CI matrix for that commit.
+    paths-ignore:
+      - benchmark.md
   pull_request:
 
 env:
@@ -63,7 +67,10 @@ jobs:
       fail-fast: false
       matrix:
         features:
+          # `--no-default-features` is the allocator-free build: parsing,
+          # arithmetic, Display/FromStr and the write_* buffer APIs only.
           - --no-default-features
+          - --no-default-features --features alloc
           - --no-default-features --features std
           - --no-default-features --features serde
           - --no-default-features --features binary

@@ -19,7 +19,6 @@
 //! and feed the resulting `Zone::Fixed` in. The seam is narrow and explicit,
 //! which is the point.
 
-use alloc::string::String;
 use core::cmp::Ordering;
 use core::fmt;
 use core::str::FromStr;
@@ -27,6 +26,10 @@ use core::str::FromStr;
 use crate::error::{Error, Result};
 use crate::format;
 use crate::offset::Offset;
+use crate::write::{with_buf, FmtSink, Write};
+
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 
 /// A timezone: UTC or a fixed offset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -74,11 +77,26 @@ impl Zone {
     }
 
     /// ISO 8601 rendering: `UTC` or the offset string.
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`Zone::write_iso`].
+    #[cfg(feature = "alloc")]
     pub fn to_iso(self) -> String {
         match self {
             Zone::Utc => alloc::string::String::from("UTC"),
             Zone::Fixed(offset) => format::format_offset(offset),
         }
+    }
+
+    /// ISO 8601 rendering into a caller-owned buffer (allocator-free).
+    ///
+    /// Returns the number of bytes written; a 10-byte buffer is always large
+    /// enough.
+    pub fn write_iso(self, out: &mut [u8]) -> Result<usize> {
+        with_buf(out, |b| match self {
+            Zone::Utc => b.write_str("UTC"),
+            Zone::Fixed(offset) => format::format_offset_into(b, offset),
+        })
     }
 
     /// Parse `UTC`, `Z` or any offset form accepted by [`Offset::from_iso`].
@@ -92,7 +110,13 @@ impl Zone {
 
 impl fmt::Display for Zone {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_iso())
+        match *self {
+            Zone::Utc => f.write_str("UTC"),
+            Zone::Fixed(offset) => {
+                let mut sink = FmtSink(f);
+                format::format_offset_into(&mut sink, offset).map_err(|_| fmt::Error)
+            }
+        }
     }
 }
 
@@ -130,6 +154,7 @@ mod tests {
         assert_eq!(z.offset().as_seconds(), 8 * 3600);
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn iso_round_trips() {
         for s in ["UTC", "+08:00", "-05:30"] {

@@ -32,10 +32,12 @@
 //! `format()` returns [`Result`] and rejects unknown directives instead of
 //! silently emitting them — a deliberate safety choice.
 
-use alloc::string::{String, ToString};
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 
 use crate::calendar::{
-    day_of_year, days_from_civil, iso_week_from_civil, weekday_from_civil, Month, Weekday,
+    day_of_year, days_from_civil, floor_div_ns, iso_week_from_civil, weekday_from_civil, Month,
+    Weekday, NS_PER_SEC,
 };
 use crate::date::Date;
 use crate::datetime::CivilDateTime;
@@ -46,6 +48,9 @@ use crate::offset::Offset;
 use crate::ticks::Ticks;
 use crate::time::TimeOfDay;
 use crate::units::{Days, IsoWeek};
+#[cfg(feature = "alloc")]
+use crate::write::alloc_string;
+use crate::write::{with_buf, write_u128, Write};
 use crate::zone::Zone;
 use crate::zoned::Zoned;
 
@@ -71,29 +76,47 @@ pub(crate) struct Parts {
 
 /// Right-justify `v` to `width` with `pad` (`0`, `_` or space); `-` means no
 /// padding.
-fn pad_num(out: &mut String, v: u64, width: usize, pad: u8) {
-    let s = v.to_string();
-    if pad == b'-' || s.len() >= width {
-        out.push_str(&s);
-        return;
+fn pad_num(out: &mut dyn Write, v: u64, width: usize, pad: u8) -> Result<()> {
+    if pad == b'-' {
+        return write_u128(out, v as u128);
+    }
+    let mut digits = [0u8; 20];
+    let mut n = 0usize;
+    let mut x = v;
+    loop {
+        digits[n] = (x % 10) as u8;
+        x /= 10;
+        n += 1;
+        if x == 0 {
+            break;
+        }
+    }
+    if n >= width {
+        for i in (0..n).rev() {
+            out.write_byte(b'0' + digits[i])?;
+        }
+        return Ok(());
     }
     let padc = if pad == b'_' || pad == b' ' {
         b' '
     } else {
         b'0'
     };
-    for _ in s.len()..width {
-        out.push(padc as char);
+    for _ in n..width {
+        out.write_byte(padc)?;
     }
-    out.push_str(&s);
+    for i in (0..n).rev() {
+        out.write_byte(b'0' + digits[i])?;
+    }
+    Ok(())
 }
 
 /// Emit a signed value with a leading `-` when negative.
-fn emit_signed(out: &mut String, v: i64, width: usize, pad: u8) {
+fn emit_signed(out: &mut dyn Write, v: i64, width: usize, pad: u8) -> Result<()> {
     if v < 0 {
-        out.push('-');
+        out.write_byte(b'-')?;
     }
-    pad_num(out, v.unsigned_abs(), width, pad);
+    pad_num(out, v.unsigned_abs(), width, pad)
 }
 
 fn hour12(hour: u32) -> u64 {
@@ -106,10 +129,10 @@ fn hour12(hour: u32) -> u64 {
 }
 
 /// Emit a fractional-second part. `width == 0` means variable (trim zeros).
-fn emit_fraction(out: &mut String, nanos: u32, width: u32) {
+fn emit_fraction(out: &mut dyn Write, nanos: u32, width: u32) -> Result<()> {
     if width == 0 {
         if nanos != 0 {
-            out.push('.');
+            out.write_byte(b'.')?;
             let mut digits = [0u8; 9];
             let mut v = nanos;
             for k in (0..9).rev() {
@@ -121,14 +144,14 @@ fn emit_fraction(out: &mut String, nanos: u32, width: u32) {
                 end -= 1;
             }
             for &d in &digits[..end] {
-                out.push((b'0' + d) as char);
+                out.write_byte(b'0' + d)?;
             }
         }
-        return;
+        return Ok(());
     }
-    out.push('.');
+    out.write_byte(b'.')?;
     let scale = 9 - width;
-    pad_num(out, (nanos / 10u32.pow(scale)) as u64, width as usize, b'0');
+    pad_num(out, (nanos / 10u32.pow(scale)) as u64, width as usize, b'0')
 }
 
 /// Week of year, Sunday-first (`%U`); week 0 covers days before the first Sunday.
@@ -167,15 +190,14 @@ fn parse_width(bytes: &[u8]) -> Result<u32> {
         .map_err(|_| Error::invalid("format width out of range"))
 }
 
-/// Format `p` according to the strftime-style `fmt` string.
-pub(crate) fn format_parts(fmt: &str, p: &Parts) -> Result<String> {
-    let mut out = String::new();
+/// Format `p` according to the strftime-style `fmt` string into `out`.
+pub(crate) fn format_parts_into(out: &mut dyn Write, fmt: &str, p: &Parts) -> Result<()> {
     let b = fmt.as_bytes();
     let mut i = 0usize;
     while i < b.len() {
         let c = b[i];
         if c != b'%' {
-            out.push(c as char);
+            out.write_byte(c)?;
             i += 1;
             continue;
         }
@@ -191,7 +213,7 @@ pub(crate) fn format_parts(fmt: &str, p: &Parts) -> Result<String> {
             }
             i += 1;
             if let Some(off) = p.offset {
-                push_offset(&mut out, off, true);
+                push_offset(out, off, true)?;
             }
             continue;
         }
@@ -213,7 +235,7 @@ pub(crate) fn format_parts(fmt: &str, p: &Parts) -> Result<String> {
                 return Err(Error::invalid("expected 'f' after '.' in format string"));
             }
             i += 1;
-            emit_fraction(&mut out, p.nanos, width);
+            emit_fraction(out, p.nanos, width)?;
             continue;
         }
         // Padding modifier: `-`, `_`, `0`, `#`.
@@ -240,114 +262,122 @@ pub(crate) fn format_parts(fmt: &str, p: &Parts) -> Result<String> {
         }
         let d = b[i];
         i += 1;
-        emit_directive(&mut out, d, pad, width, p)?;
+        emit_directive(out, d, pad, width, p)?;
     }
+    Ok(())
+}
+
+/// Format `p` to a fresh `String` (requires the `alloc` feature).
+#[cfg(feature = "alloc")]
+pub(crate) fn format_parts(fmt: &str, p: &Parts) -> Result<String> {
+    let mut out = String::new();
+    format_parts_into(&mut out, fmt, p)?;
     Ok(out)
 }
 
-fn emit_directive(out: &mut String, d: u8, pad: u8, width: usize, p: &Parts) -> Result<()> {
+fn emit_directive(out: &mut dyn Write, d: u8, pad: u8, width: usize, p: &Parts) -> Result<()> {
     let year = p.year as i64;
     let wd = weekday_from_civil(days_from_civil(p.year, p.month, p.day));
     let (iso_year, iso_week) = iso_week_from_civil(p.year, p.month, p.day);
     match d {
-        b'Y' => emit_signed(out, year, width.max(4), pad),
-        b'y' => pad_num(out, year.rem_euclid(100) as u64, 2, pad),
-        b'C' => pad_num(out, year.div_euclid(100) as u64, 2, pad),
-        b'm' => pad_num(out, p.month as u64, 2, pad),
-        b'd' => pad_num(out, p.day as u64, 2, pad),
-        b'e' => pad_num(out, p.day as u64, 2, b' '),
-        b'j' => pad_num(out, day_of_year(p.year, p.month, p.day) as u64, 3, pad),
-        b'H' => pad_num(out, p.hour as u64, 2, pad),
-        b'I' => pad_num(out, hour12(p.hour), 2, pad),
-        b'k' => pad_num(out, p.hour as u64, 2, b' '),
-        b'l' => pad_num(out, hour12(p.hour), 2, b' '),
-        b'M' => pad_num(out, p.minute as u64, 2, pad),
-        b'S' => pad_num(out, p.second as u64, 2, pad),
-        b'f' => pad_num(out, p.nanos as u64, 9, b'0'),
-        b'p' => out.push_str(if p.hour < 12 { "AM" } else { "PM" }),
-        b'P' => out.push_str(if p.hour < 12 { "am" } else { "pm" }),
-        b'a' => out.push_str(wd.short_name()),
-        b'A' => out.push_str(wd.name()),
-        b'b' | b'h' => out.push_str(Month::from_u32(p.month).map_or("", |m| m.short_name())),
-        b'B' => out.push_str(Month::from_u32(p.month).map_or("", |m| m.name())),
-        b'G' => emit_signed(out, iso_year as i64, width.max(4), pad),
-        b'g' => pad_num(out, (iso_year as i64).rem_euclid(100) as u64, 2, pad),
-        b'V' => pad_num(out, iso_week as u64, 2, pad),
-        b'u' => pad_num(out, (wd as u8 + 1) as u64, 1, pad),
-        b'w' => pad_num(out, ((wd as u8 + 1) % 7) as u64, 1, pad),
-        b'U' => pad_num(out, week_of_year_sun(p.year, p.month, p.day) as u64, 2, pad),
-        b'W' => pad_num(out, week_of_year_mon(p.year, p.month, p.day) as u64, 2, pad),
+        b'Y' => emit_signed(out, year, width.max(4), pad)?,
+        b'y' => pad_num(out, year.rem_euclid(100) as u64, 2, pad)?,
+        b'C' => pad_num(out, year.div_euclid(100) as u64, 2, pad)?,
+        b'm' => pad_num(out, p.month as u64, 2, pad)?,
+        b'd' => pad_num(out, p.day as u64, 2, pad)?,
+        b'e' => pad_num(out, p.day as u64, 2, b' ')?,
+        b'j' => pad_num(out, day_of_year(p.year, p.month, p.day) as u64, 3, pad)?,
+        b'H' => pad_num(out, p.hour as u64, 2, pad)?,
+        b'I' => pad_num(out, hour12(p.hour), 2, pad)?,
+        b'k' => pad_num(out, p.hour as u64, 2, b' ')?,
+        b'l' => pad_num(out, hour12(p.hour), 2, b' ')?,
+        b'M' => pad_num(out, p.minute as u64, 2, pad)?,
+        b'S' => pad_num(out, p.second as u64, 2, pad)?,
+        b'f' => pad_num(out, p.nanos as u64, 9, b'0')?,
+        b'p' => out.write_str(if p.hour < 12 { "AM" } else { "PM" })?,
+        b'P' => out.write_str(if p.hour < 12 { "am" } else { "pm" })?,
+        b'a' => out.write_str(wd.short_name())?,
+        b'A' => out.write_str(wd.name())?,
+        b'b' | b'h' => out.write_str(Month::from_u32(p.month).map_or("", |m| m.short_name()))?,
+        b'B' => out.write_str(Month::from_u32(p.month).map_or("", |m| m.name()))?,
+        b'G' => emit_signed(out, iso_year as i64, width.max(4), pad)?,
+        b'g' => pad_num(out, (iso_year as i64).rem_euclid(100) as u64, 2, pad)?,
+        b'V' => pad_num(out, iso_week as u64, 2, pad)?,
+        b'u' => pad_num(out, (wd as u8 + 1) as u64, 1, pad)?,
+        b'w' => pad_num(out, ((wd as u8 + 1) % 7) as u64, 1, pad)?,
+        b'U' => pad_num(out, week_of_year_sun(p.year, p.month, p.day) as u64, 2, pad)?,
+        b'W' => pad_num(out, week_of_year_mon(p.year, p.month, p.day) as u64, 2, pad)?,
         b'z' => {
             if let Some(off) = p.offset {
-                push_offset(out, off, false);
+                push_offset(out, off, false)?;
             }
         }
         b'Z' => {
             if let Some(name) = p.zone_name {
-                out.push_str(name);
+                out.write_str(name)?;
             }
         }
         b's' => {
             if let Some(ts) = p.timestamp {
-                out.push_str(&ts.to_string());
+                write_u128(out, ts as u128)?;
             }
         }
-        b'n' => out.push('\n'),
-        b't' => out.push('\t'),
-        b'%' => out.push('%'),
+        b'n' => out.write_byte(b'\n')?,
+        b't' => out.write_byte(b'\t')?,
+        b'%' => out.write_byte(b'%')?,
         b'F' => {
             emit_directive(out, b'Y', pad, width, p)?;
-            out.push('-');
+            out.write_byte(b'-')?;
             emit_directive(out, b'm', pad, width, p)?;
-            out.push('-');
+            out.write_byte(b'-')?;
             emit_directive(out, b'd', pad, width, p)?;
         }
         b'D' | b'x' => {
             emit_directive(out, b'm', pad, width, p)?;
-            out.push('/');
+            out.write_byte(b'/')?;
             emit_directive(out, b'd', pad, width, p)?;
-            out.push('/');
+            out.write_byte(b'/')?;
             emit_directive(out, b'y', pad, width, p)?;
         }
         b'R' => {
             emit_directive(out, b'H', pad, width, p)?;
-            out.push(':');
+            out.write_byte(b':')?;
             emit_directive(out, b'M', pad, width, p)?;
         }
         b'T' | b'X' => {
             emit_directive(out, b'H', pad, width, p)?;
-            out.push(':');
+            out.write_byte(b':')?;
             emit_directive(out, b'M', pad, width, p)?;
-            out.push(':');
+            out.write_byte(b':')?;
             emit_directive(out, b'S', pad, width, p)?;
         }
         b'r' => {
             emit_directive(out, b'I', pad, width, p)?;
-            out.push(':');
+            out.write_byte(b':')?;
             emit_directive(out, b'M', pad, width, p)?;
-            out.push(':');
+            out.write_byte(b':')?;
             emit_directive(out, b'S', pad, width, p)?;
-            out.push(' ');
+            out.write_byte(b' ')?;
             emit_directive(out, b'p', pad, width, p)?;
         }
         b'+' => {
             emit_directive(out, b'Y', pad, 4, p)?;
-            out.push('-');
+            out.write_byte(b'-')?;
             emit_directive(out, b'm', pad, 2, p)?;
-            out.push('-');
+            out.write_byte(b'-')?;
             emit_directive(out, b'd', pad, 2, p)?;
-            out.push('T');
+            out.write_byte(b'T')?;
             emit_directive(out, b'H', pad, 2, p)?;
-            out.push(':');
+            out.write_byte(b':')?;
             emit_directive(out, b'M', pad, 2, p)?;
-            out.push(':');
+            out.write_byte(b':')?;
             emit_directive(out, b'S', pad, 2, p)?;
             if p.nanos != 0 {
-                emit_fraction(out, p.nanos, 0);
+                emit_fraction(out, p.nanos, 0)?;
             }
             match p.offset {
-                Some(off) => push_offset(out, off, true),
-                None => out.push('Z'),
+                Some(off) => push_offset(out, off, true)?,
+                None => out.write_byte(b'Z')?,
             }
         }
         _ => return Err(Error::invalid("unknown format directive")),
@@ -355,46 +385,29 @@ fn emit_directive(out: &mut String, d: u8, pad: u8, width: usize, p: &Parts) -> 
     Ok(())
 }
 
-fn push_offset(out: &mut String, offset: Offset, with_colon: bool) {
+fn push_offset(out: &mut dyn Write, offset: Offset, with_colon: bool) -> Result<()> {
     if offset.is_utc() {
-        if with_colon {
-            out.push_str("+00:00");
-        } else {
-            out.push_str("+0000");
-        }
-        return;
+        return out.write_str(if with_colon { "+00:00" } else { "+0000" });
     }
     let secs = offset.as_seconds();
-    out.push(if secs < 0 { '-' } else { '+' });
+    out.write_byte(if secs < 0 { b'-' } else { b'+' })?;
     let abs = secs.unsigned_abs();
     let hours = abs / 3600;
     let rem = abs % 3600;
     let minutes = rem / 60;
     let seconds = rem % 60;
+    pad_num(out, hours as u64, 2, b'0')?;
     if with_colon {
-        let mut tmp = String::new();
-        pad_num(&mut tmp, hours as u64, 2, b'0');
-        out.push_str(&tmp);
-        out.push(':');
-        let mut tmp = String::new();
-        pad_num(&mut tmp, minutes as u64, 2, b'0');
-        out.push_str(&tmp);
-    } else {
-        let mut tmp = String::new();
-        pad_num(&mut tmp, hours as u64, 2, b'0');
-        out.push_str(&tmp);
-        let mut tmp = String::new();
-        pad_num(&mut tmp, minutes as u64, 2, b'0');
-        out.push_str(&tmp);
+        out.write_byte(b':')?;
     }
+    pad_num(out, minutes as u64, 2, b'0')?;
     if seconds != 0 {
         if with_colon {
-            out.push(':');
+            out.write_byte(b':')?;
         }
-        let mut tmp = String::new();
-        pad_num(&mut tmp, seconds as u64, 2, b'0');
-        out.push_str(&tmp);
+        pad_num(out, seconds as u64, 2, b'0')?;
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1144,11 +1157,29 @@ fn parts_from_civil(
     }
 }
 
+/// strftime rendering of a [`Date`] into a caller-owned buffer.
+pub(crate) fn write_date(date: Date, fmt: &str, out: &mut [u8]) -> Result<usize> {
+    let p = parts_from_civil(CivilDateTime::new(date, TimeOfDay::MIDNIGHT), None, None);
+    with_buf(out, |b| format_parts_into(b, fmt, &p))
+}
+
+#[cfg(feature = "alloc")]
 pub(crate) fn format_date(date: Date, fmt: &str) -> Result<String> {
     let p = parts_from_civil(CivilDateTime::new(date, TimeOfDay::MIDNIGHT), None, None);
     format_parts(fmt, &p)
 }
 
+/// strftime rendering of a [`TimeOfDay`] into a caller-owned buffer.
+pub(crate) fn write_time(time: TimeOfDay, fmt: &str, out: &mut [u8]) -> Result<usize> {
+    let p = parts_from_civil(
+        CivilDateTime::new(Date::from_days_since_epoch(0), time),
+        None,
+        None,
+    );
+    with_buf(out, |b| format_parts_into(b, fmt, &p))
+}
+
+#[cfg(feature = "alloc")]
 pub(crate) fn format_time(time: TimeOfDay, fmt: &str) -> Result<String> {
     let p = parts_from_civil(
         CivilDateTime::new(Date::from_days_since_epoch(0), time),
@@ -1158,20 +1189,52 @@ pub(crate) fn format_time(time: TimeOfDay, fmt: &str) -> Result<String> {
     format_parts(fmt, &p)
 }
 
+/// strftime rendering of a [`CivilDateTime`] into a caller-owned buffer.
+pub(crate) fn write_civil(dt: CivilDateTime, fmt: &str, out: &mut [u8]) -> Result<usize> {
+    with_buf(out, |b| {
+        format_parts_into(b, fmt, &parts_from_civil(dt, None, None))
+    })
+}
+
+#[cfg(feature = "alloc")]
 pub(crate) fn format_civil(dt: CivilDateTime, fmt: &str) -> Result<String> {
     format_parts(fmt, &parts_from_civil(dt, None, None))
 }
 
-pub(crate) fn format_ticks(ticks: Ticks, fmt: &str) -> Result<String> {
+/// strftime rendering of [`Ticks`] (UTC civil parts) into a caller-owned
+/// buffer.
+pub(crate) fn write_ticks(ticks: Ticks, fmt: &str, out: &mut [u8]) -> Result<usize> {
     let dt = ticks.to_civil_utc()?;
     let mut p = parts_from_civil(dt, Some(Offset::UTC), Some("UTC"));
     // `%s` needs seconds as `i64`; instants beyond that range render it as
     // empty rather than wrapping (the civil projection above already bounds
     // us, but a 9.2e18-day instant can still exceed i64 seconds).
-    p.timestamp = i64::try_from(ticks.as_unix_nanos().div_euclid(1_000_000_000)).ok();
+    p.timestamp = i64::try_from(floor_div_ns(ticks.as_unix_nanos(), NS_PER_SEC)).ok();
+    with_buf(out, |b| format_parts_into(b, fmt, &p))
+}
+
+#[cfg(feature = "alloc")]
+pub(crate) fn format_ticks(ticks: Ticks, fmt: &str) -> Result<String> {
+    let dt = ticks.to_civil_utc()?;
+    let mut p = parts_from_civil(dt, Some(Offset::UTC), Some("UTC"));
+    p.timestamp = i64::try_from(floor_div_ns(ticks.as_unix_nanos(), NS_PER_SEC)).ok();
     format_parts(fmt, &p)
 }
 
+/// strftime rendering of [`Zoned`] (local civil parts) into a caller-owned
+/// buffer.
+pub(crate) fn write_zoned(zoned: Zoned, fmt: &str, out: &mut [u8]) -> Result<usize> {
+    let dt = zoned.civil()?;
+    let zone_name = match zoned.zone() {
+        Zone::Utc => Some("UTC"),
+        Zone::Fixed(_) => None,
+    };
+    let mut p = parts_from_civil(dt, Some(zoned.offset()), zone_name);
+    p.timestamp = i64::try_from(floor_div_ns(zoned.ticks().as_unix_nanos(), NS_PER_SEC)).ok();
+    with_buf(out, |b| format_parts_into(b, fmt, &p))
+}
+
+#[cfg(feature = "alloc")]
 pub(crate) fn format_zoned(zoned: Zoned, fmt: &str) -> Result<String> {
     let dt = zoned.civil()?;
     let zone_name = match zoned.zone() {
@@ -1179,7 +1242,7 @@ pub(crate) fn format_zoned(zoned: Zoned, fmt: &str) -> Result<String> {
         Zone::Fixed(_) => None,
     };
     let mut p = parts_from_civil(dt, Some(zoned.offset()), zone_name);
-    p.timestamp = i64::try_from(zoned.ticks().as_unix_nanos().div_euclid(1_000_000_000)).ok();
+    p.timestamp = i64::try_from(floor_div_ns(zoned.ticks().as_unix_nanos(), NS_PER_SEC)).ok();
     format_parts(fmt, &p)
 }
 
@@ -1218,32 +1281,46 @@ pub(crate) fn parse_zoned(fmt: &str, s: &str) -> Result<Zoned> {
 // RFC 2822 (email / HTTP header dates)
 // ---------------------------------------------------------------------------
 
-/// RFC 2822 rendering: `Tue,  1 Jul 2003 10:52:37 +0200`.
-pub(crate) fn format_rfc2822(date: Date, time: TimeOfDay, offset: Offset) -> String {
-    let mut out = String::new();
-    out.push_str(date.weekday().short_name());
-    out.push_str(", ");
-    pad_num(&mut out, date.day() as u64, 2, b' ');
-    out.push(' ');
-    out.push_str(Month::from_u32(date.month()).map_or("", |m| m.short_name()));
-    out.push(' ');
-    emit_signed(&mut out, date.year() as i64, 4, b'0');
-    out.push(' ');
+/// RFC 2822 rendering core: `Tue,  1 Jul 2003 10:52:37 +0200`.
+pub(crate) fn format_rfc2822_into(
+    out: &mut dyn Write,
+    date: Date,
+    time: TimeOfDay,
+    offset: Offset,
+) -> Result<()> {
+    out.write_str(date.weekday().short_name())?;
+    out.write_str(", ")?;
+    pad_num(out, date.day() as u64, 2, b' ')?;
+    out.write_byte(b' ')?;
+    out.write_str(Month::from_u32(date.month()).map_or("", |m| m.short_name()))?;
+    out.write_byte(b' ')?;
+    emit_signed(out, date.year() as i64, 4, b'0')?;
+    out.write_byte(b' ')?;
     let (h, m, s, _) = time.parts();
-    let mut t = String::new();
-    pad_num(&mut t, h as u64, 2, b'0');
-    out.push_str(&t);
-    out.push(':');
-    let mut t = String::new();
-    pad_num(&mut t, m as u64, 2, b'0');
-    out.push_str(&t);
-    out.push(':');
-    let mut t = String::new();
-    pad_num(&mut t, s as u64, 2, b'0');
-    out.push_str(&t);
-    out.push(' ');
-    push_offset(&mut out, offset, false);
-    out
+    pad_num(out, h as u64, 2, b'0')?;
+    out.write_byte(b':')?;
+    pad_num(out, m as u64, 2, b'0')?;
+    out.write_byte(b':')?;
+    pad_num(out, s as u64, 2, b'0')?;
+    out.write_byte(b' ')?;
+    push_offset(out, offset, false)
+}
+
+/// RFC 2822 rendering into a caller-owned buffer.
+pub(crate) fn write_rfc2822(
+    date: Date,
+    time: TimeOfDay,
+    offset: Offset,
+    out: &mut [u8],
+) -> Result<usize> {
+    with_buf(out, |b| format_rfc2822_into(b, date, time, offset))
+}
+
+/// RFC 2822 rendering to a fresh `String` (requires the `alloc` feature).
+#[cfg(feature = "alloc")]
+pub(crate) fn format_rfc2822(date: Date, time: TimeOfDay, offset: Offset) -> String {
+    alloc_string(|b| format_rfc2822_into(b, date, time, offset))
+        .expect("an RFC 2822 date fits 64 bytes")
 }
 
 fn named_zone_offset(name: &str) -> Option<i32> {

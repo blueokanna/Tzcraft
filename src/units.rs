@@ -101,7 +101,7 @@ impl fmt::Display for IsoWeek {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "alloc"))]
 mod tests {
     use super::*;
     use alloc::string::ToString;

@@ -17,6 +17,8 @@ pub enum ErrorKind {
     Overflow,
     /// A timezone offset outside ±24 hours was requested.
     InvalidOffset,
+    /// The caller-supplied output buffer was too small to hold the text.
+    BufferOverflow,
     /// Generic invalid input.
     Invalid(&'static str),
 }
@@ -57,6 +59,11 @@ impl Error {
         Error::new(ErrorKind::InvalidOffset)
     }
 
+    /// The output buffer was too small.
+    pub const fn buffer_overflow() -> Error {
+        Error::new(ErrorKind::BufferOverflow)
+    }
+
     /// Generic invalid input.
     pub const fn invalid(what: &'static str) -> Error {
         Error::new(ErrorKind::Invalid(what))
@@ -80,6 +87,7 @@ impl fmt::Display for Error {
             ErrorKind::Parse(what) => write!(f, "parse error: {what}"),
             ErrorKind::Overflow => write!(f, "arithmetic overflow"),
             ErrorKind::InvalidOffset => write!(f, "timezone offset must be within ±24 hours"),
+            ErrorKind::BufferOverflow => write!(f, "output buffer is too small"),
             ErrorKind::Invalid(what) => write!(f, "invalid input: {what}"),
         }?;
         if let Some(offset) = self.offset {
@@ -95,7 +103,7 @@ impl std::error::Error for Error {}
 /// Convenience alias for `tzcraft` operations.
 pub type Result<T> = core::result::Result<T, Error>;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "alloc"))]
 mod tests {
     use super::*;
     use alloc::string::ToString;

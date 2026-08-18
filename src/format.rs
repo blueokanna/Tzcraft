@@ -10,15 +10,18 @@
 //! - `T`, `t` or a single space as the date/time separator;
 //! - expanded years (optional sign, 4+ digits).
 
-use alloc::string::String;
-use alloc::string::ToString;
-
 use crate::calendar::{NS_PER_DAY, NS_PER_HOUR, NS_PER_MIN, NS_PER_SEC};
 use crate::date::Date;
 use crate::duration::Duration;
 use crate::error::{Error, Result};
 use crate::offset::Offset;
 use crate::time::TimeOfDay;
+#[cfg(feature = "alloc")]
+use crate::write::alloc_string;
+use crate::write::{with_buf, write_padded, write_u128, Write};
+
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 
 /// Fractional-second precision for textual output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,73 +42,52 @@ pub enum FractionDigits {
 // Formatting
 // ---------------------------------------------------------------------------
 
-/// Emit `value` right-justified to at least `width` digits with zero padding.
-pub(crate) fn write_padded(out: &mut String, value: i64, width: usize) {
-    debug_assert!(value >= 0);
-    let mut digits = [0u8; 20];
-    let mut len = 0;
-    let mut n = value;
-    loop {
-        digits[len] = (n % 10) as u8;
-        n /= 10;
-        len += 1;
-        if n == 0 {
-            break;
-        }
-    }
-    for _ in len..width {
-        out.push('0');
-    }
-    for i in (0..len).rev() {
-        out.push((b'0' + digits[i]) as char);
-    }
-}
-
 /// `YYYY-MM-DD`, with an expanded-year sign when needed.
-pub(crate) fn format_date_into(out: &mut String, year: i32, month: u32, day: u32) {
+pub(crate) fn format_date_into(out: &mut dyn Write, year: i32, month: u32, day: u32) -> Result<()> {
     if year < 0 {
-        out.push('-');
-        write_padded(out, -(year as i64), 4);
+        out.write_byte(b'-')?;
+        write_padded(out, -(year as i64), 4)?;
     } else {
-        write_padded(out, year as i64, 4);
+        write_padded(out, year as i64, 4)?;
     }
-    out.push('-');
-    write_padded(out, month as i64, 2);
-    out.push('-');
-    write_padded(out, day as i64, 2);
+    out.write_byte(b'-')?;
+    write_padded(out, month as i64, 2)?;
+    out.write_byte(b'-')?;
+    write_padded(out, day as i64, 2)?;
+    Ok(())
 }
 
 /// `HH:MM:SS` plus the requested fractional part.
 pub(crate) fn format_time_into(
-    out: &mut String,
+    out: &mut dyn Write,
     hour: u32,
     minute: u32,
     second: u32,
     nanos: u32,
     fraction: FractionDigits,
-) {
-    write_padded(out, hour as i64, 2);
-    out.push(':');
-    write_padded(out, minute as i64, 2);
-    out.push(':');
-    write_padded(out, second as i64, 2);
+) -> Result<()> {
+    write_padded(out, hour as i64, 2)?;
+    out.write_byte(b':')?;
+    write_padded(out, minute as i64, 2)?;
+    out.write_byte(b':')?;
+    write_padded(out, second as i64, 2)?;
     match fraction {
         FractionDigits::None => {}
         FractionDigits::Milli => {
-            out.push('.');
-            write_padded(out, (nanos / 1_000_000) as i64, 3);
+            out.write_byte(b'.')?;
+            write_padded(out, (nanos / 1_000_000) as i64, 3)?;
         }
         FractionDigits::Micro => {
-            out.push('.');
-            write_padded(out, (nanos / 1_000) as i64, 6);
+            out.write_byte(b'.')?;
+            write_padded(out, (nanos / 1_000) as i64, 6)?;
         }
         FractionDigits::Nano => {
-            out.push('.');
-            write_padded(out, nanos as i64, 9);
+            out.write_byte(b'.')?;
+            write_padded(out, nanos as i64, 9)?;
         }
         FractionDigits::Auto => {
             if nanos != 0 {
-                out.push('.');
+                out.write_byte(b'.')?;
                 let mut digits = [0u8; 9];
                 let mut v = nanos;
                 for i in (0..9).rev() {
@@ -117,102 +99,132 @@ pub(crate) fn format_time_into(
                     end -= 1;
                 }
                 for &d in &digits[..end] {
-                    out.push((b'0' + d) as char);
+                    out.write_byte(b'0' + d)?;
                 }
             }
         }
     }
+    Ok(())
 }
 
 /// `Z` or `±HH:MM[:SS]` (seconds shown only when nonzero).
-pub(crate) fn format_offset_into(out: &mut String, offset: Offset) {
+pub(crate) fn format_offset_into(out: &mut dyn Write, offset: Offset) -> Result<()> {
     if offset.is_utc() {
-        out.push('Z');
-        return;
+        out.write_byte(b'Z')?;
+        return Ok(());
     }
     let secs = offset.as_seconds();
-    out.push(if secs < 0 { '-' } else { '+' });
+    out.write_byte(if secs < 0 { b'-' } else { b'+' })?;
     let abs = secs.unsigned_abs();
     let hours = abs / 3600;
     let rem = abs % 3600;
     let minutes = rem / 60;
     let seconds = rem % 60;
-    write_padded(out, hours as i64, 2);
-    out.push(':');
-    write_padded(out, minutes as i64, 2);
+    write_padded(out, hours as i64, 2)?;
+    out.write_byte(b':')?;
+    write_padded(out, minutes as i64, 2)?;
     if seconds != 0 {
-        out.push(':');
-        write_padded(out, seconds as i64, 2);
+        out.write_byte(b':')?;
+        write_padded(out, seconds as i64, 2)?;
     }
+    Ok(())
 }
 
 /// `YYYY-MM-DDTHH:MM:SS[.fraction]offset`.
 pub(crate) fn format_rfc3339_into(
-    out: &mut String,
+    out: &mut dyn Write,
     date: Date,
     time: TimeOfDay,
     offset: Offset,
     fraction: FractionDigits,
-) {
+) -> Result<()> {
     let (y, m, d) = date.parts();
-    format_date_into(out, y, m, d);
-    out.push('T');
+    format_date_into(out, y, m, d)?;
+    out.write_byte(b'T')?;
     let (h, mi, s, ns) = time.parts();
-    format_time_into(out, h, mi, s, ns, fraction);
-    format_offset_into(out, offset);
+    format_time_into(out, h, mi, s, ns, fraction)?;
+    format_offset_into(out, offset)
+}
+
+/// Render an RFC 3339 timestamp into a caller-owned buffer.
+///
+/// Returns the number of bytes written; the buffer must be large enough
+/// (≈ 35 bytes for the longest form), otherwise [`Error::buffer_overflow`]
+/// is returned. This is the allocator-free equivalent of
+/// [`Ticks::to_rfc3339`](crate::Ticks::to_rfc3339).
+pub(crate) fn write_rfc3339(
+    out: &mut [u8],
+    date: Date,
+    time: TimeOfDay,
+    offset: Offset,
+    fraction: FractionDigits,
+) -> Result<usize> {
+    with_buf(out, |b| {
+        format_rfc3339_into(b, date, time, offset, fraction)
+    })
 }
 
 /// [`format_rfc3339_into`] for a [`Date`].
+#[cfg(feature = "alloc")]
 pub(crate) fn format_date(date: Date) -> String {
     let (y, m, d) = date.parts();
-    let mut out = String::new();
-    format_date_into(&mut out, y, m, d);
-    out
+    alloc_string(|b| format_date_into(b, y, m, d)).expect("a 16-byte date fits 64 bytes")
 }
 
 /// [`format_time_into`] for a [`TimeOfDay`].
+#[cfg(feature = "alloc")]
 pub(crate) fn format_time(time: TimeOfDay, fraction: FractionDigits) -> String {
     let (h, m, s, ns) = time.parts();
-    let mut out = String::new();
-    format_time_into(&mut out, h, m, s, ns, fraction);
-    out
+    alloc_string(|b| format_time_into(b, h, m, s, ns, fraction))
+        .expect("a 20-byte time fits 64 bytes")
 }
 
 /// Date plus time, no zone.
+#[cfg(feature = "alloc")]
 pub(crate) fn format_civil(dt: crate::datetime::CivilDateTime, fraction: FractionDigits) -> String {
-    let mut out = String::new();
-    format_date_into(&mut out, dt.year(), dt.month(), dt.day());
-    out.push('T');
-    let (h, mi, s, ns) = dt.time().parts();
-    format_time_into(&mut out, h, mi, s, ns, fraction);
-    out
+    alloc_string(|b| {
+        format_date_into(b, dt.year(), dt.month(), dt.day())?;
+        b.write_byte(b'T')?;
+        let (h, mi, s, ns) = dt.time().parts();
+        format_time_into(b, h, mi, s, ns, fraction)
+    })
+    .expect("a 40-byte civil timestamp fits 64 bytes")
 }
 
 /// [`format_offset_into`] for an [`Offset`].
+#[cfg(feature = "alloc")]
 pub(crate) fn format_offset(offset: Offset) -> String {
-    let mut out = String::new();
-    format_offset_into(&mut out, offset);
-    out
+    alloc_string(|b| format_offset_into(b, offset)).expect("a 10-byte offset fits 64 bytes")
 }
 
-/// ISO 8601 duration rendering.
+/// RFC 3339 rendering to a `String` via a stack buffer (one allocation).
+#[cfg(feature = "alloc")]
+pub(crate) fn format_rfc3339_alloc(
+    date: Date,
+    time: TimeOfDay,
+    offset: Offset,
+    fraction: FractionDigits,
+) -> Result<String> {
+    alloc_string(|b| format_rfc3339_into(b, date, time, offset, fraction))
+}
+
+/// ISO 8601 duration rendering core.
 ///
 /// Produces `P[n]DT[n]H[n]M[n]S` with an optional fractional second, or
 /// `PT0S` for zero. Weeks are never produced (they canonicalize to days).
-pub(crate) fn format_duration_iso(d: Duration) -> String {
-    let mut out = String::new();
+pub(crate) fn format_duration_iso_into(out: &mut dyn Write, d: Duration) -> Result<()> {
     if d.is_negative() {
-        out.push('-');
+        out.write_byte(b'-')?;
     }
     let abs = d.unsigned_abs();
-    out.push('P');
+    out.write_byte(b'P')?;
 
     let day = NS_PER_DAY as u128;
     let days = abs / day;
     let rem = abs % day;
     if days > 0 {
-        out.push_str(&days.to_string());
-        out.push('D');
+        write_u128(out, days)?;
+        out.write_byte(b'D')?;
     }
 
     let hours = rem / (NS_PER_HOUR as u128);
@@ -224,19 +236,19 @@ pub(crate) fn format_duration_iso(d: Duration) -> String {
 
     let has_time = hours > 0 || minutes > 0 || seconds > 0 || subsec > 0;
     if has_time {
-        out.push('T');
+        out.write_byte(b'T')?;
         if hours > 0 {
-            out.push_str(&hours.to_string());
-            out.push('H');
+            write_u128(out, hours)?;
+            out.write_byte(b'H')?;
         }
         if minutes > 0 {
-            out.push_str(&minutes.to_string());
-            out.push('M');
+            write_u128(out, minutes)?;
+            out.write_byte(b'M')?;
         }
         if seconds > 0 || subsec > 0 {
-            out.push_str(&seconds.to_string());
+            write_u128(out, seconds)?;
             if subsec > 0 {
-                out.push('.');
+                out.write_byte(b'.')?;
                 let mut digits = [0u8; 9];
                 let mut v = subsec;
                 for i in (0..9).rev() {
@@ -248,15 +260,28 @@ pub(crate) fn format_duration_iso(d: Duration) -> String {
                     end -= 1;
                 }
                 for &d in &digits[..end] {
-                    out.push((b'0' + d) as char);
+                    out.write_byte(b'0' + d)?;
                 }
             }
-            out.push('S');
+            out.write_byte(b'S')?;
         }
     }
     if !has_time && days == 0 {
-        out.push_str("T0S");
+        out.write_str("T0S")?;
     }
+    Ok(())
+}
+
+/// Render an ISO 8601 duration into a caller-owned buffer.
+pub(crate) fn write_duration_iso(out: &mut [u8], d: Duration) -> Result<usize> {
+    with_buf(out, |b| format_duration_iso_into(b, d))
+}
+
+/// ISO 8601 duration rendering.
+#[cfg(feature = "alloc")]
+pub(crate) fn format_duration_iso(d: Duration) -> String {
+    let mut out = String::new();
+    format_duration_iso_into(&mut out, d).expect("a fresh String never overflows");
     out
 }
 
@@ -660,39 +685,49 @@ fn add_duration_component(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "alloc")]
     use crate::datetime::CivilDateTime;
+    use crate::write::Buf;
 
     #[test]
     fn fraction_digits_variants() {
-        let t = TimeOfDay::from_hms_nano(12, 0, 0, 500_000_000).unwrap();
-        let mut out = String::new();
-        format_time_into(&mut out, 12, 0, 0, 500_000_000, FractionDigits::None);
-        assert_eq!(out, "12:00:00");
-        out.clear();
-        format_time_into(&mut out, 12, 0, 0, 500_000_000, FractionDigits::Milli);
-        assert_eq!(out, "12:00:00.500");
-        out.clear();
-        format_time_into(&mut out, 12, 0, 0, 500_000_000, FractionDigits::Micro);
-        assert_eq!(out, "12:00:00.500000");
-        out.clear();
-        format_time_into(&mut out, 12, 0, 0, 500_000_000, FractionDigits::Nano);
-        assert_eq!(out, "12:00:00.500000000");
-        out.clear();
-        format_time_into(&mut out, 12, 0, 0, 500_000_000, FractionDigits::Auto);
-        assert_eq!(out, "12:00:00.5");
-        assert_eq!(t.to_iso(), "12:00:00.5");
+        let mut storage = [0u8; 64];
+        let mut buf = Buf::new(&mut storage);
+        format_time_into(&mut buf, 12, 0, 0, 500_000_000, FractionDigits::None).unwrap();
+        assert_eq!(buf.as_str(), "12:00:00");
+        buf.clear();
+        format_time_into(&mut buf, 12, 0, 0, 500_000_000, FractionDigits::Milli).unwrap();
+        assert_eq!(buf.as_str(), "12:00:00.500");
+        buf.clear();
+        format_time_into(&mut buf, 12, 0, 0, 500_000_000, FractionDigits::Micro).unwrap();
+        assert_eq!(buf.as_str(), "12:00:00.500000");
+        buf.clear();
+        format_time_into(&mut buf, 12, 0, 0, 500_000_000, FractionDigits::Nano).unwrap();
+        assert_eq!(buf.as_str(), "12:00:00.500000000");
+        buf.clear();
+        format_time_into(&mut buf, 12, 0, 0, 500_000_000, FractionDigits::Auto).unwrap();
+        assert_eq!(buf.as_str(), "12:00:00.5");
     }
 
     #[test]
     fn negative_years_format() {
-        let mut out = String::new();
-        format_date_into(&mut out, -1, 12, 31);
-        assert_eq!(out, "-0001-12-31");
-        out.clear();
-        format_date_into(&mut out, 10_000, 1, 1);
-        assert_eq!(out, "10000-01-01");
+        let mut storage = [0u8; 64];
+        let mut buf = Buf::new(&mut storage);
+        format_date_into(&mut buf, -1, 12, 31).unwrap();
+        assert_eq!(buf.as_str(), "-0001-12-31");
+        buf.clear();
+        format_date_into(&mut buf, 10_000, 1, 1).unwrap();
+        assert_eq!(buf.as_str(), "10000-01-01");
     }
 
+    #[test]
+    fn buffer_overflow_is_an_error() {
+        let mut small = [0u8; 4];
+        let mut buf = Buf::new(&mut small);
+        assert!(format_time_into(&mut buf, 23, 59, 59, 123_456_789, FractionDigits::Auto).is_err());
+    }
+
+    #[cfg(feature = "alloc")]
     #[test]
     fn offsets_with_seconds() {
         let o = Offset::from_hms(-4, 30, 15).unwrap();
@@ -700,6 +735,7 @@ mod tests {
         assert_eq!(format_offset(Offset::UTC), "Z");
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn duration_format_vectors() {
         assert_eq!(Duration::ZERO.to_iso8601(), "PT0S");
@@ -713,6 +749,7 @@ mod tests {
         assert_eq!(Duration::from_seconds(-1).to_iso8601(), "-PT1S");
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn civil_format() {
         let dt = CivilDateTime::from_ymd_hms(2024, 2, 29, 23, 59, 59).unwrap();

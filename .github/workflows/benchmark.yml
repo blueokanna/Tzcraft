@@ -1,0 +1,51 @@
+# Runs the comparison benchmark (tzcraft vs chrono / time / jiff), appends
+# the dependency and `unsafe` footprint, and commits the assembled report to
+# `benchmark.md` in the repository root.
+#
+# The three comparison libraries live only in the `benchmarks/` package
+# (`publish = false`); `tzcraft`'s own dependency graph is unaffected.
+
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - benchmark.md
+      - benchmarks/Cargo.lock
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: tzcraft vs chrono / time / jiff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: benchmarks
+
+      - name: Run the comparison harness
+        run: cargo run --release --manifest-path benchmarks/Cargo.toml -- benchmark.md "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(git rev-parse --short HEAD)" "$(uname -srm)"
+
+      - name: Append dependency and unsafe footprint
+        run: bash benchmarks/footprint.sh benchmark.md
+
+      - name: Commit benchmark.md
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add benchmark.md benchmarks/Cargo.lock
+          if git diff --cached --quiet; then
+            echo "No benchmark changes; nothing to commit."
+          else
+            git commit -m "Update benchmark report"
+            git push
+          fi

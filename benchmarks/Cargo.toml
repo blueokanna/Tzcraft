@@ -1,0 +1,22 @@
+[package]
+name = "tzcraft-benchmarks"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Comparison benchmark + safety harness for tzcraft vs chrono / time / jiff. Development-only; never published and never part of tzcraft's dependency graph."
+license = "Apache-2.0"
+
+[dependencies]
+# The library under test, as a path dependency.
+tzcraft = { path = ".." }
+
+# Comparison targets. These exist ONLY in this development-only package;
+# tzcraft itself does not depend on any of them.
+chrono = { version = "=0.4.45", default-features = false, features = ["alloc"] }
+time = { version = "=0.3.55", default-features = false, features = ["alloc", "parsing", "formatting"] }
+jiff = { version = "=0.2.35", default-features = false, features = ["std"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

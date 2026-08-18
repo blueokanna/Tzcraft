@@ -4,7 +4,6 @@
 //! `0..86_400_000_000_000`. All accessors are arithmetic on that single
 //! counter; there is no hour/minute/second state to desynchronize.
 
-use alloc::string::String;
 use core::fmt;
 use core::str::FromStr;
 
@@ -13,6 +12,10 @@ use crate::duration::Duration;
 use crate::error::{Error, Result};
 use crate::format::{self, FractionDigits};
 use crate::strftime;
+use crate::write::{with_buf, FmtSink};
+
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 
 /// A time of day, nanosecond precision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -201,8 +204,23 @@ impl TimeOfDay {
     }
 
     /// Strict ISO 8601 rendering (`HH:MM:SS[.fffffffff]`).
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`TimeOfDay::write_iso`].
+    #[cfg(feature = "alloc")]
     pub fn to_iso(self) -> String {
         format::format_time(self, FractionDigits::Auto)
+    }
+
+    /// Strict ISO 8601 rendering into a caller-owned buffer (allocator-free).
+    ///
+    /// Returns the number of bytes written; a 16-byte buffer is always large
+    /// enough.
+    pub fn write_iso(self, out: &mut [u8]) -> Result<usize> {
+        let (h, m, s, ns) = self.parts();
+        with_buf(out, |b| {
+            format::format_time_into(b, h, m, s, ns, FractionDigits::Auto)
+        })
     }
 
     /// Parse a strict ISO 8601 time of day (`HH:MM:SS`, optional fraction).
@@ -213,8 +231,17 @@ impl TimeOfDay {
     /// strftime-style rendering, e.g. `t.format("%H:%M:%S%.f")`.
     ///
     /// The `%`-directive set is documented on [`crate::Ticks::format`].
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`TimeOfDay::write_format`].
+    #[cfg(feature = "alloc")]
     pub fn format(self, fmt: &str) -> Result<String> {
         strftime::format_time(self, fmt)
+    }
+
+    /// strftime-style rendering into a caller-owned buffer (allocator-free).
+    pub fn write_format(self, fmt: &str, out: &mut [u8]) -> Result<usize> {
+        strftime::write_time(self, fmt, out)
     }
 
     /// Parse with a strftime-style format string (chrono's
@@ -226,7 +253,10 @@ impl TimeOfDay {
 
 impl fmt::Display for TimeOfDay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_iso())
+        let (h, m, s, ns) = self.parts();
+        let mut sink = FmtSink(f);
+        format::format_time_into(&mut sink, h, m, s, ns, FractionDigits::Auto)
+            .map_err(|_| fmt::Error)
     }
 }
 
@@ -290,6 +320,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn iso_round_trips() {
         for s in ["00:00:00", "23:59:59", "12:00:00.5", "12:00:00.123456789"] {

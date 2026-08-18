@@ -59,6 +59,42 @@ pub(crate) const fn floor_mod(a: i64, b: i64) -> i64 {
     }
 }
 
+/// Floor division of a timeline quantity (`i128` nanoseconds) by `unit`.
+///
+/// For non-negative operands plain `/` is used — a single instruction pair —
+/// instead of `div_euclid`'s branch-and-adjust sequence. Both branches have
+/// identical results.
+#[inline]
+pub(crate) fn floor_div_ns(ns: i128, unit: i128) -> i128 {
+    if ns >= 0 {
+        ns / unit
+    } else {
+        ns.div_euclid(unit)
+    }
+}
+
+/// Floor remainder of a timeline quantity by `unit`, in `0..unit`.
+#[inline]
+pub(crate) fn floor_rem_ns(ns: i128, unit: i128) -> i128 {
+    if ns >= 0 {
+        ns % unit
+    } else {
+        ns.rem_euclid(unit)
+    }
+}
+
+/// Decompose nanoseconds since the Unix epoch into `(floor_days, ns_of_day)`
+/// with `ns_of_day` in `0..NS_PER_DAY`. The single projection both [`Ticks`]
+/// and [`CivilDateTime`] route their timeline arithmetic through, so the
+/// floor/carry semantics live in exactly one place.
+///
+/// [`Ticks`]: crate::Ticks
+/// [`CivilDateTime`]: crate::CivilDateTime
+#[inline]
+pub(crate) fn ns_divmod_day(ns: i128) -> (i128, i128) {
+    (floor_div_ns(ns, NS_PER_DAY), floor_rem_ns(ns, NS_PER_DAY))
+}
+
 /// Whether `year` is a leap year in the proleptic Gregorian calendar.
 #[inline]
 pub(crate) const fn is_leap_year(year: i32) -> bool {

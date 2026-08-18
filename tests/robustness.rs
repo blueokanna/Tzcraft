@@ -6,6 +6,10 @@
 //! that malformed input is rejected with an error (never a panic), and that
 //! well-formed input round-trips.
 
+// The formatting entry points under test allocate (`format`, `to_rfc3339`,
+// ...), so this suite needs the `alloc` feature.
+#![cfg(feature = "alloc")]
+
 use tzcraft::{CivilDateTime, Date, Days, Duration, Months, Offset, Ticks, TimeOfDay, Zone, Zoned};
 
 /// A tiny deterministic PRNG (xorshift64*) so the harness needs no `rand`.

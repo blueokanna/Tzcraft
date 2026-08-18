@@ -1,26 +1,29 @@
 # Tzcraft
 
 [![CI](https://github.com/blueokanna/Tzcraft/actions/workflows/ci.yml/badge.svg)](https://github.com/blueokanna/Tzcraft/actions/workflows/ci.yml)
+[![docs.rs](https://img.shields.io/docsrs/tzcraft)](https://docs.rs/tzcraft)
 
-A date and time library for Rust that doesn't copy the usual playbook.
+A date and time library for Rust built on one idea: **one timeline, and
+everything else is a projection**. The whole axis is a signed 128-bit
+nanosecond counter (`Ticks`); the proleptic Gregorian calendar, weekdays,
+ISO weeks and timezone offsets are pure projections onto that axis. No web
+of `Add` impls, no global "current timezone" variable, no IANA database
+downloads at runtime, no `unsafe`.
 
-The core idea is plain: **one timeline, and everything else is a
-projection**. The whole axis is a signed 128-bit nanosecond counter
-(`Ticks`); the Gregorian calendar, weekdays, ISO weeks and timezone offsets
-are all pure projections onto that axis. No web of `Add` impls, no global
-"current timezone" variable, no IANA database downloads at runtime, no
-`unsafe`.
+The crate is `#![no_std]` in every configuration and, with the default
+features off, builds **without an allocator at all**.
 
 ## Why another time library
 
-Because the existing ones carry shapes I don't want.
+The existing reference libraries carry shapes that this project deliberately
+does not want:
 
 - `chrono` bakes the timezone into the type parameter; `DateTime<Tz>` drags
-  generics everywhere and every operation gets implemented several times.
-- `time` uses `i64` nanoseconds plus an offset, which squeezes the range to
-  about ±167 years and makes you think about overflow.
-- `jiff` is nice, but behind it sit the IANA database, runtime state, and a
-  heavy dependency tree.
+  generics everywhere and every operation is implemented several times.
+- `time` stores an offset plus `i64` nanoseconds since midnight, squeezing
+  the range and making overflow a thing to think about.
+- `jiff` is pleasant, but behind it sit the IANA database, runtime state and
+  a heavy dependency tree.
 
 `tzcraft` swaps in a different set of assumptions. Each one is a fact about
 the code you can check yourself.
@@ -31,12 +34,12 @@ the Unix epoch (`1970-01-01T00:00:00Z`). 128 bits buys full nanosecond
 precision *and* a range of roughly ±292 billion years — no "small instant /
 big instant" split, no overflow-collapse strategy to memorize. `Duration` is
 a separate *signed* span type: the type system refuses to let you add two
-instants, because `Ticks + Ticks` simply doesn't compile.
+instants, because `Ticks + Ticks` does not compile.
 
 **2. Civil types are projections, not owners.**
 `Date`, `TimeOfDay` and `CivilDateTime` carry no arithmetic of their own.
-Midnight-crossing additions and year-boundary carries all project onto the
-single `i128` nanosecond axis and get computed once. Calendar-aware
+Midnight-crossing additions and year-boundary carries project onto the
+single `i128` nanosecond axis and are computed once. Calendar-aware
 operations (months, years) exist in exactly one place — project, adjust,
 re-project — so you never hunt for the right impl among a dozen type
 combinations.
@@ -79,6 +82,41 @@ Every type implements `nextjson`'s format-neutral contract
 JSON stays readable and self-describing, the binary profile stays compact —
 no separate serde module, no feature that silently changes the format. One
 implementation, two shapes.
+
+## `no_std`, with or without an allocator
+
+The crate is `#![no_std]` in every build. The `alloc` feature (on by
+default, because `std` implies it) only gates the APIs that return an owned
+`String` and the codecs:
+
+| Feature | What it enables |
+| --- | --- |
+| `std` (default) | `Ticks::now()`, `to_std_time`, `std::error::Error` |
+| `alloc` (default via `std`) | `to_rfc3339`, `format`, `to_iso`, `to_iso8601`, ... (the `String`-returning methods) |
+| `serde` (default) | `nextjson` text/binary codec implementations (`tzcraft::codec`) |
+| `binary` (default) | `rustbinary` compact wire (`tzcraft::binary`) |
+
+With `--no-default-features` the crate links **no allocator**: parsing,
+arithmetic, `Display`/`FromStr`, and every `write_*` buffer-formatting
+method keep working. Every `String`-returning method has an allocator-free
+twin that writes into a caller-owned slice and returns the byte count:
+
+```rust
+use tzcraft::{Date, Ticks};
+
+let mut buf = [0u8; 64];
+let d = Date::from_ymd(2024, 2, 29).unwrap();
+let n = d.write_iso(&mut buf).unwrap();
+assert_eq!(&buf[..n], b"2024-02-29");
+
+let n = Ticks::EPOCH
+    .write_rfc3339(&mut buf, tzcraft::FractionDigits::None)
+    .unwrap();
+assert_eq!(&buf[..n], b"1970-01-01T00:00:00Z");
+```
+
+The allocator-free sinks are exposed as `tzcraft::write::{Write, Buf}`,
+ready for embedded targets.
 
 ## Quick start
 
@@ -134,6 +172,25 @@ struct Alarm {
 }
 ```
 
+## Y2038: safe by construction
+
+The Year 2038 problem is a 32-bit signed-seconds overflow
+(`i32::MAX` seconds after the epoch = `2038-01-19T03:14:07Z`). `tzcraft`
+cannot hit it:
+
+- `Ticks` is `i128` nanoseconds since the epoch — range ≈ ±292 billion
+  years;
+- every `timestamp*` accessor and `from_timestamp*` constructor uses `i64`
+  seconds — range ≈ ±292 billion years;
+- `Date` is `i32` **days** since the epoch (≈ ±5.8 million years), never
+  seconds;
+- the only `i32` time-domain value, `Offset`, is bounded to ±24 h and
+  validated at construction.
+
+`tests/y2038.rs` pins the boundary behaviour: the exact rollover second
+(`2_147_483_647` → `2_147_483_648`), pre-epoch extremes, expanded years past
+9999, and text round-trips across the boundary.
+
 ## Moving from chrono
 
 `tzcraft` covers the everyday `chrono` API. `_opt` variants become plain
@@ -178,11 +235,36 @@ oversights:
 3. **`num_*` returns `Result<i64>`** — out-of-range values are explicit
    errors instead of silent overflow.
 
-`Local` (the system-local zone) is not in v1: pure `std` can't read the
-local offset (that needs `libc`/platform FFI, and this crate only depends on
-`nextjson` and `rustbinary` while denying `unsafe`). If your wall clock must
-follow the real local zone, resolve the offset with a platform API and hand
-it to `Zone::fixed(...)` — the seam is explicit.
+`Local` (the system-local zone) is not in v1: pure `std` cannot read the
+local offset (that needs `libc`/platform FFI, and the core crate only
+depends on `nextjson` and `rustbinary` while denying `unsafe`). If your wall
+clock must follow the real local zone, resolve the offset with a platform
+API and hand it to `Zone::fixed(...)` — the seam is explicit.
+
+## Migration: bring `chrono` / `time` / `rustix` code in
+
+Migration is **one-way easy: into `tzcraft`**. The crate does not depend on
+`chrono`, `time` or `rustix` — its only dependencies are `nextjson` and
+`rustbinary` (both optional) — so there is nothing that links those crates
+and nothing that makes leaving easier than arriving. The tables above (and
+the `time`/`rustix` equivalents in the
+[`tzcraft::migration`](https://docs.rs/tzcraft/latest/tzcraft/migration/index.html)
+module documentation) show the mechanical, name-identical port.
+
+- `chrono`: see the table above — `DateTime`/`NaiveDate`/`NaiveTime`/
+  `NaiveDateTime`/`Duration`/`FixedOffset` map to `Ticks`/`Date`/
+  `TimeOfDay`/`CivilDateTime`/`Duration`/`Offset`.
+- `time`: `OffsetDateTime` → `Zoned`, `PrimitiveDateTime` → `CivilDateTime`,
+  `Date` → `Date`, `Time` → `TimeOfDay`, `UtcOffset` → `Offset`, `Duration`
+  → `Duration`.
+- `rustix`: `Timespec` (a POSIX `{tv_sec, tv_nsec}` pair) →
+  `Ticks::from_timespec(tv_sec, tv_nsec)`.
+
+Porting a *value* is exact: every `tzcraft` accessor yields the same
+integers the reference libraries use (`Ticks::to_unix_seconds` →
+`(i64, u32)`, `Date::parts`, `TimeOfDay::parts`, `Offset::as_seconds`,
+`Duration::as_nanos`). The full mapping and worked examples are in the
+`tzcraft::migration` module.
 
 ## What's deliberately not here
 
@@ -193,10 +275,10 @@ it to `Zone::fixed(...)` — the seam is explicit.
 - **Only the proleptic Gregorian calendar** (year 0 = 1 BCE). No Julian, no
   Hebrew, no other calendars.
 - **Strict ISO 8601 / RFC 3339 / RFC 2822 plus strftime.** What we ship is
-  complete and tested; there's no half-finished template engine.
-- **No `unsafe`, no dependencies beyond `nextjson` and `rustbinary`.**
-  `no_std + alloc`; default features are `std`, `serde`, `binary`, each can
-  be switched off.
+  complete and tested; there is no half-finished template engine.
+- **No `unsafe`.** Dependencies: `nextjson` (codecs) and `rustbinary`
+  (binary), both optional. No third-party date/time library appears anywhere
+  in the dependency graph.
 
 ## Layout
 
@@ -212,10 +294,12 @@ src/
   offset.rs     Offset: seconds within +/-24h
   zone.rs       Zone: Utc / fixed offset
   zoned.rs      Zoned: Ticks + Zone
+  write.rs      allocator-free Write trait + Buf sinks (no_std, no alloc)
   format.rs     hand-written ISO / RFC 3339 parser & formatter
   strftime.rs   strftime engine + RFC 2822 (the chrono-compatible surface)
   codec.rs      nextjson contract impls (human-readable vs binary branch)
   binary.rs     rustbinary facade
+  migration.rs  guide: bringing chrono / time / rustix code in
 ```
 
 The parsers scan bytes one at a time and every failure carries a byte
@@ -230,8 +314,13 @@ rejected, never truncated. Truncation would be lying about the data.
   of malformed inputs.
 - Codec: every type round-trips through both nextjson text and rustbinary
   binary, plus derived structs that mix tzcraft types.
-- chrono parity: `tests/chrono_parity.rs` exercises the migration surface
+- `chrono` parity: `tests/chrono_parity.rs` exercises the migration surface
   using real chrono idioms.
+- Y2038: `tests/y2038.rs` pins the boundary, pre-epoch extremes and expanded
+  years.
+- No-alloc: `tests/no_alloc.rs` runs only with `--no-default-features` and
+  proves parsing, `Display`/`FromStr` and the `write_*` buffer APIs work
+  without an allocator.
 - Robustness: `tests/robustness.rs` feeds thousands of adversarial inputs
   (random bytes, oversized inputs, malformed structures, extreme numbers,
   hostile format strings) through every parse and format entry point. The
@@ -248,19 +337,36 @@ rejected, never truncated. Truncation would be lying about the data.
 
 ```sh
 cargo test --all-features
-cargo clippy --all-features --all-targets
+cargo clippy --all-features --all-targets -- -D warnings
 cargo audit
 ```
+
+## Benchmarking
+
+[`benchmark.md`](./benchmark.md) holds the comparison report: tzcraft vs
+`chrono` 0.4.45 / `time` 0.3.55 / `jiff` 0.2.35, for RFC 3339 parse and
+format, civil projection, date arithmetic, duration arithmetic and weekday,
+plus a panic-freedom fuzz run and a dependency/`unsafe` footprint.
+
+The harness lives in the **`benchmarks/`** package (`publish = false`). It
+is the only place the three comparison libraries appear; they are never part
+of tzcraft's dependency graph. A GitHub Action re-runs it on every push to
+`main` and commits the fresh numbers back to `benchmark.md`.
+
+Methodology is documented in [`benchmarks/README.md`](./benchmarks/README.md)
+and inline in the report: identical inputs, `black_box`, varied input arrays
+to defeat loop-invariant code motion, and a minimum-of-three timing scheme.
+Numbers are machine-specific and only comparable within a single run.
 
 ## CI
 
 `.github/workflows/ci.yml` runs on every push and pull request: formatting,
 clippy with `-D warnings`, debug and release tests, the feature matrix
-(no-default / `std` / `serde` / `binary`), docs built with `-D warnings`, a
-`docs.rs`-condition build (nightly with `--cfg docsrs`, the exact flags
-docs.rs uses), a security audit against the RustSec advisory database, and
-the full test suite at the declared MSRV **1.81** (the floor is set by
-`rustbinary`, which needs `error_in_core`).
+(`--no-default-features` and each of `alloc` / `std` / `serde` / `binary`),
+docs built with `-D warnings`, a `docs.rs`-condition build (nightly with
+`--cfg docsrs`, the exact flags docs.rs uses), a security audit against the
+RustSec advisory database, and the full test suite at the declared MSRV
+**1.81**.
 
 ## License
 

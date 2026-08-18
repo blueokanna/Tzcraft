@@ -12,11 +12,10 @@
 //! no arithmetic of their own; calendar-aware operations
 //! (months, years) are implemented once here as project → adjust → re-project.
 
-use alloc::string::String;
 use core::fmt;
 use core::str::FromStr;
 
-use crate::calendar::{Weekday, NS_PER_DAY, NS_PER_SEC};
+use crate::calendar::{floor_div_ns, floor_rem_ns, ns_divmod_day, Weekday, NS_PER_SEC};
 use crate::date::Date;
 use crate::datetime::CivilDateTime;
 use crate::duration::Duration;
@@ -26,8 +25,12 @@ use crate::offset::Offset;
 use crate::strftime;
 use crate::time::TimeOfDay;
 use crate::units::{Days, Months};
+use crate::write::{with_buf, write_u128, FmtSink, Write};
 use crate::zone::Zone;
 use crate::zoned::Zoned;
+
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 
 /// A signed 128-bit nanosecond instant since `1970-01-01T00:00:00Z`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -84,42 +87,74 @@ impl Ticks {
 
     /// Whole seconds since the epoch, flooring (the mathematically correct
     /// Unix time; `chrono` truncates toward zero for pre-epoch instants).
+    #[inline]
     pub fn timestamp(self) -> Result<i64> {
-        let secs = self.0.div_euclid(NS_PER_SEC);
+        let secs = floor_div_ns(self.0, NS_PER_SEC);
         i64::try_from(secs).map_err(|_| Error::out_of_range("instant"))
     }
 
     /// Whole milliseconds since the epoch, flooring.
+    #[inline]
     pub fn timestamp_millis(self) -> Result<i64> {
-        let ms = self.0.div_euclid(1_000_000);
+        let ms = floor_div_ns(self.0, 1_000_000);
         i64::try_from(ms).map_err(|_| Error::out_of_range("instant"))
     }
 
     /// Whole microseconds since the epoch, flooring.
+    #[inline]
     pub fn timestamp_micros(self) -> Result<i64> {
-        let us = self.0.div_euclid(1_000);
+        let us = floor_div_ns(self.0, 1_000);
         i64::try_from(us).map_err(|_| Error::out_of_range("instant"))
     }
 
     /// Nanoseconds since the epoch as `i64`; fails beyond the `i64` range.
+    #[inline]
     pub fn timestamp_nanos(self) -> Result<i64> {
         i64::try_from(self.0).map_err(|_| Error::out_of_range("instant"))
     }
 
     /// Raw nanoseconds since the Unix epoch.
+    #[inline]
     pub const fn as_unix_nanos(self) -> i128 {
         self.0
     }
 
     /// Decompose into whole seconds (floor) and sub-second nanoseconds.
     ///
-    /// Fails only for instants whose day count exceeds `i64`, i.e. roughly
-    /// outside ±2.9 billion years.
+    /// The `(i64 seconds, u32 nanoseconds)` pair is the same shape that
+    /// `chrono`, `time` and `rustix` build instants from — a pure numeric
+    /// accessor, with no dependency on any of those crates. Fails only for
+    /// instants whose day count exceeds `i64`, i.e. roughly outside ±2.9
+    /// billion years.
+    #[inline]
     pub fn to_unix_seconds(self) -> Result<(i64, u32)> {
-        let secs = self.0.div_euclid(NS_PER_SEC);
-        let nanos = self.0.rem_euclid(NS_PER_SEC);
+        let secs = floor_div_ns(self.0, NS_PER_SEC);
+        let nanos = floor_rem_ns(self.0, NS_PER_SEC);
         let secs = i64::try_from(secs).map_err(|_| Error::out_of_range("instant"))?;
         Ok((secs, nanos as u32))
+    }
+
+    /// POSIX-`timespec`-shaped decomposition: `(seconds, nanoseconds)` as
+    /// signed 64-bit values (the same layout as `struct timespec` on Unix,
+    /// and therefore the shape `rustix`'s `Timespec` uses).
+    ///
+    /// Fails only when the whole-second count exceeds `i64` (≈ ±292 billion
+    /// years); the nanosecond component is always in `0..1_000_000_000`.
+    #[inline]
+    pub fn to_timespec(self) -> Result<(i64, i64)> {
+        let (secs, nanos) = self.to_unix_seconds()?;
+        Ok((secs, nanos as i64))
+    }
+
+    /// Build from a POSIX-`timespec`-shaped `(seconds, nanoseconds)` pair.
+    ///
+    /// `nanos` must be in `0..1_000_000_000`; any other value is rejected
+    /// (POSIX `timespec` normalization is not silently applied).
+    pub fn from_timespec(seconds: i64, nanos: i64) -> Result<Ticks> {
+        if !(0..1_000_000_000).contains(&nanos) {
+            return Err(Error::out_of_range("nanosecond"));
+        }
+        Ticks::from_unix_seconds(seconds, nanos as u32)
     }
 
     /// The current wall-clock instant (requires the `std` feature).
@@ -226,9 +261,9 @@ impl Ticks {
     /// The UTC civil projection `(date, time-of-day)`.
     ///
     /// Fails only for instants whose day count exceeds `i64`.
+    #[inline]
     pub fn to_civil_utc(self) -> Result<CivilDateTime> {
-        let days = self.0.div_euclid(NS_PER_DAY);
-        let rem = self.0.rem_euclid(NS_PER_DAY);
+        let (days, rem) = ns_divmod_day(self.0);
         let days = i64::try_from(days).map_err(|_| Error::out_of_range("instant"))?;
         let date = Date::from_days_checked(days)?;
         let time = TimeOfDay::from_nanos_since_midnight(rem as u64)?;
@@ -260,14 +295,29 @@ impl Ticks {
     /// The canonical form carries the `Z` designator. Instants beyond the
     /// civil `i64` day range (≈ ±2.9 billion years) fall back to a raw
     /// nanosecond count followed by `s`.
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`Ticks::write_rfc3339`].
+    #[cfg(feature = "alloc")]
     pub fn to_rfc3339(self, fraction: FractionDigits) -> String {
         match self.to_civil_utc() {
-            Ok(dt) => {
-                let mut out = alloc::string::String::new();
-                format::format_rfc3339_into(&mut out, dt.date(), dt.time(), Offset::UTC, fraction);
-                out
-            }
+            Ok(dt) => format::format_rfc3339_alloc(dt.date(), dt.time(), Offset::UTC, fraction)
+                .expect("an RFC 3339 timestamp fits 64 bytes"),
             Err(_) => alloc::format!("{}s", self.0),
+        }
+    }
+
+    /// RFC 3339 rendering into a caller-owned buffer (allocator-free).
+    ///
+    /// Returns the number of bytes written. A 64-byte buffer is always large
+    /// enough; [`Error::buffer_overflow`] is returned when it is not.
+    pub fn write_rfc3339(self, out: &mut [u8], fraction: FractionDigits) -> Result<usize> {
+        match self.to_civil_utc() {
+            Ok(dt) => format::write_rfc3339(out, dt.date(), dt.time(), Offset::UTC, fraction),
+            Err(_) => with_buf(out, |b| {
+                write_u128(b, self.0 as u128)?;
+                b.write_byte(b's')
+            }),
         }
     }
 
@@ -288,8 +338,17 @@ impl Ticks {
     /// directives: `%Y %y %C %m %d %e %j %H %I %k %l %M %S %f %.f %.3f %p
     /// %P %a %A %b %h %B %G %g %V %u %w %U %W %z %:z %Z %s %F %D %x %R %T
     /// %X %r %+ %n %t %%`, plus the `%-`/`%_`/`%0` padding modifiers.
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`Ticks::write_format`].
+    #[cfg(feature = "alloc")]
     pub fn format(self, fmt: &str) -> Result<String> {
         strftime::format_ticks(self, fmt)
+    }
+
+    /// strftime-style rendering into a caller-owned buffer (allocator-free).
+    pub fn write_format(self, fmt: &str, out: &mut [u8]) -> Result<usize> {
+        strftime::write_ticks(self, fmt, out)
     }
 
     /// Parse with a strftime-style format string (chrono's
@@ -299,10 +358,25 @@ impl Ticks {
     }
 
     /// RFC 2822 rendering in UTC (email / HTTP header dates).
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`Ticks::write_rfc2822`].
+    #[cfg(feature = "alloc")]
     pub fn to_rfc2822(self) -> String {
         match self.to_civil_utc() {
             Ok(dt) => strftime::format_rfc2822(dt.date(), dt.time(), Offset::UTC),
             Err(_) => alloc::format!("{} +0000", self.0),
+        }
+    }
+
+    /// RFC 2822 rendering into a caller-owned buffer (allocator-free).
+    pub fn write_rfc2822(self, out: &mut [u8]) -> Result<usize> {
+        match self.to_civil_utc() {
+            Ok(dt) => strftime::write_rfc2822(dt.date(), dt.time(), Offset::UTC, out),
+            Err(_) => with_buf(out, |b| {
+                write_u128(b, self.0 as u128)?;
+                b.write_str(" +0000")
+            }),
         }
     }
 
@@ -316,7 +390,20 @@ impl Ticks {
 
 impl fmt::Display for Ticks {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_rfc3339(FractionDigits::Auto))
+        match self.to_civil_utc() {
+            Ok(dt) => {
+                let mut sink = FmtSink(f);
+                format::format_rfc3339_into(
+                    &mut sink,
+                    dt.date(),
+                    dt.time(),
+                    Offset::UTC,
+                    FractionDigits::Auto,
+                )
+                .map_err(|_| fmt::Error)
+            }
+            Err(_) => write!(f, "{}s", self.0),
+        }
     }
 }
 
@@ -364,6 +451,7 @@ mod tests {
         assert_eq!((y, m, d), (1969, 12, 31));
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn calendar_months_clamp() {
         let jan31 = Ticks::from_rfc3339("2023-01-31T12:00:00Z").unwrap();
@@ -412,6 +500,7 @@ mod tests {
 
     #[test]
     fn rfc3339_round_trips() {
+        use crate::write::Buf;
         for s in [
             "1970-01-01T00:00:00Z",
             "2024-02-29T23:59:59.5Z",
@@ -430,17 +519,21 @@ mod tests {
             let shifted = t
                 .checked_add(Duration::from_seconds(off.as_seconds() as i64))
                 .unwrap();
-            let mut expect = alloc::string::String::new();
-            format::format_rfc3339_into(&mut expect, date, time, off, FractionDigits::Auto);
-            let mut got = alloc::string::String::new();
+            let mut storage_a = [0u8; 64];
+            let mut storage_b = [0u8; 64];
+            let mut expect = Buf::new(&mut storage_a);
+            format::format_rfc3339_into(&mut expect, date, time, off, FractionDigits::Auto)
+                .unwrap();
+            let mut got = Buf::new(&mut storage_b);
             format::format_rfc3339_into(
                 &mut got,
                 shifted.to_civil_utc().unwrap().date(),
                 shifted.to_civil_utc().unwrap().time(),
                 off,
                 FractionDigits::Auto,
-            );
-            assert_eq!(got, expect, "{s}");
+            )
+            .unwrap();
+            assert_eq!(got.as_str(), expect.as_str(), "{s}");
         }
     }
 

@@ -1,0 +1,43 @@
+name: Publish wiki
+
+on:
+    push:
+        branches: [main]
+        paths: ["wiki/**"]
+    workflow_dispatch:
+
+permissions:
+    contents: write
+
+jobs:
+    publish-wiki:
+        name: Sync wiki pages
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout main
+              uses: actions/checkout@v4
+              with:
+                  path: repo
+
+            - name: Checkout wiki
+              uses: actions/checkout@v4
+              with:
+                  repository: blueokanna/Tzcraft.wiki
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  path: wiki
+
+            - name: Copy staging pages into the wiki
+              run: cp -r repo/wiki/. wiki/
+
+            - name: Commit and push
+              run: |
+                  cd wiki
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add -A
+                  if git diff --cached --quiet; then
+                    echo "No wiki changes; nothing to push."
+                  else
+                    git commit -m "Sync wiki pages from main"
+                    git push
+                  fi

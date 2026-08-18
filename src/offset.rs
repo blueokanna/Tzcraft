@@ -4,13 +4,16 @@
 //! the open interval `(-24h, 24h)`. It is the smallest timezone concept there
 //! is: no transitions, no rules, just "how far is this clock from UTC".
 
-use alloc::string::String;
 use core::fmt;
 use core::str::FromStr;
 
 use crate::calendar::SECS_PER_DAY;
 use crate::error::{Error, Result};
 use crate::format;
+use crate::write::{with_buf, FmtSink};
+
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 
 /// A UTC offset in seconds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -115,8 +118,20 @@ impl Offset {
     }
 
     /// ISO 8601 rendering: `Z`, or `±HH:MM` with `:SS` when seconds differ.
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`Offset::write_iso`].
+    #[cfg(feature = "alloc")]
     pub fn to_iso(self) -> String {
         format::format_offset(self)
+    }
+
+    /// ISO 8601 rendering into a caller-owned buffer (allocator-free).
+    ///
+    /// Returns the number of bytes written; a 10-byte buffer is always large
+    /// enough.
+    pub fn write_iso(self, out: &mut [u8]) -> Result<usize> {
+        with_buf(out, |b| format::format_offset_into(b, self))
     }
 
     /// Parse `Z`, `±HH:MM`, `±HHMM`, `±HH` or `±HH:MM:SS`.
@@ -127,7 +142,8 @@ impl Offset {
 
 impl fmt::Display for Offset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_iso())
+        let mut sink = FmtSink(f);
+        format::format_offset_into(&mut sink, *self).map_err(|_| fmt::Error)
     }
 }
 
@@ -156,6 +172,7 @@ mod tests {
         assert!(Offset::from_seconds(-86_400).is_err());
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn iso_round_trips() {
         for s in ["Z", "+08:00", "-05:30", "-04:30:15"] {

@@ -33,12 +33,16 @@
 //!
 //! ## Scope, stated plainly
 //!
-//! `tzcraft` is `no_std` + `alloc`, `#![deny(unsafe_code)]`, with no
-//! dependencies beyond `nextjson` (text/`serde`) and `rustbinary` (binary).
-//! It does **not** ship an IANA timezone database and does **not** pretend
-//! that fixed offsets are daylight-saving rules. If a wall clock must follow
-//! real transitions, resolve the offset with your own policy and hand the
-//! resulting `Zone::Fixed` to the library. The seam is explicit on purpose.
+//! `tzcraft` is `#![no_std]`, `#![deny(unsafe_code)]`, with no dependencies
+//! beyond `nextjson` (text/`serde`) and `rustbinary` (binary). With the
+//! default features it links `alloc` for the `String`-returning formatting
+//! methods and the codecs; with `--no-default-features` it builds **without
+//! an allocator at all** — parsing, arithmetic, `Display`/`FromStr` and the
+//! `write_*` buffer APIs all keep working. It does **not** ship an IANA
+//! timezone database and does **not** pretend that fixed offsets are
+//! daylight-saving rules. If a wall clock must follow real transitions,
+//! resolve the offset with your own policy and hand the resulting
+//! `Zone::Fixed` to the library. The seam is explicit on purpose.
 //!
 //! ## `chrono` replacement surface
 //!
@@ -56,13 +60,21 @@
 //!
 //! ## Quick start
 //!
+//! The example below uses only allocator-free APIs (`write_*` buffer
+//! rendering), so it runs in every configuration. The codec round-trip is
+//! shown in the [`codec`] module.
+//!
 //! ```
 //! use tzcraft::{Date, Duration, Months, Offset, Ticks, Weekday, Zone, Zoned};
 //!
 //! // One timeline, any reading.
 //! let launch = Ticks::from_rfc3339("2024-06-15T08:30:00Z")?;
 //! let local = launch.to_zoned(Zone::fixed(Offset::from_hms(8, 0, 0)?));
-//! assert_eq!(local.to_rfc3339(tzcraft::FractionDigits::None), "2024-06-15T16:30:00+08:00");
+//!
+//! // Buffer rendering: no allocator required.
+//! let mut out = [0u8; 64];
+//! let n = local.write_rfc3339(&mut out, tzcraft::FractionDigits::None)?;
+//! assert_eq!(&out[..n], b"2024-06-15T16:30:00+08:00");
 //! assert_eq!(local.date()?.weekday(), Weekday::Saturday);
 //!
 //! // Const calendar math: the compiler computes this at compile time.
@@ -76,16 +88,9 @@
 //!
 //! // Durations are signed and ISO 8601 round-trip cleanly.
 //! let span = Duration::from_iso8601("P1DT2H3M4.5S")?;
-//! assert_eq!(span.to_iso8601(), "P1DT2H3M4.5S");
-//!
-//! // Text and binary codecs share one implementation.
-//! let json = nextjson::nextencode(&local)?;
-//! let back: Zoned = nextjson::nextdecode(&json)?;
-//! assert_eq!(back, local);
-//! let bin = tzcraft::binary::encode(&local)?;
-//! let back: Zoned = tzcraft::binary::decode(&bin)?;
-//! assert_eq!(back, local);
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! let n = span.write_iso8601(&mut out)?;
+//! assert_eq!(&out[..n], b"P1DT2H3M4.5S");
+//! # Ok::<(), tzcraft::Error>(())
 //! ```
 //!
 //! ## `chrono` migration in one glance
@@ -93,16 +98,20 @@
 //! ```
 //! use tzcraft::{CivilDateTime, Date, Duration, Months, Ticks, Weekday};
 //!
-//! // `Utc::now().timestamp_millis()`
-//! let now_ms = Ticks::now()?.timestamp_millis()?;
+//! // `DateTime::from_timestamp(1_700_000_000, 0)` / `.timestamp_millis()`
+//! let now_ms = Ticks::from_timestamp(1_700_000_000, 0)?.timestamp_millis()?;
+//! assert_eq!(now_ms, 1_700_000_000_000);
 //! // `NaiveDate::from_ymd_opt(2024, 2, 29).unwrap()`
 //! let d = Date::from_ymd(2024, 2, 29)?;
-//! // `d.format("%A %d %B %Y")`
-//! assert_eq!(d.format("%A %d %B %Y")?, "Thursday 29 February 2024");
+//! // `d.format("%A %d %B %Y")` (allocator-free: `write_format`)
+//! let mut out = [0u8; 64];
+//! let n = d.write_format("%A %d %B %Y", &mut out)?;
+//! assert_eq!(&out[..n], b"Thursday 29 February 2024");
 //! // `d.and_hms_opt(12, 0, 0).unwrap()`
 //! let dt = d.and_hms(12, 0, 0)?;
 //! // `dt.format("%Y-%m-%d %H:%M:%S")`
-//! assert_eq!(dt.format("%Y-%m-%d %H:%M:%S")?, "2024-02-29 12:00:00");
+//! let n = dt.write_format("%Y-%m-%d %H:%M:%S", &mut out)?;
+//! assert_eq!(&out[..n], b"2024-02-29 12:00:00");
 //! // `d.checked_add_months(Months::new(1))`, `checked_add_days(Days::new(1))`
 //! assert_eq!(d.checked_add_months(Months::new(1))?, Date::from_ymd(2024, 3, 29)?);
 //! // `NaiveDateTime::parse_from_str`
@@ -112,7 +121,7 @@
 //! );
 //! // `dt.signed_duration_since(...)`
 //! assert_eq!(dt.signed_duration_since(dt), Duration::ZERO);
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! # Ok::<(), tzcraft::Error>(())
 //! ```
 
 #![no_std]
@@ -123,6 +132,12 @@
 // crate feature ..." badges on docs.rs (nightly); on stable it is inert.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+// The crate is `#![no_std]` in every configuration. With the default
+// features it additionally links `alloc` (for the `String`-returning
+// formatting methods and the codecs); with `--no-default-features` it builds
+// without an allocator entirely (parsing, arithmetic, `Display`/`FromStr`
+// and the `write_*` buffer APIs all keep working).
+#[cfg(feature = "alloc")]
 extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
@@ -145,6 +160,8 @@ mod zoned;
 
 #[cfg(feature = "binary")]
 pub mod binary;
+/// Allocator-free output sinks ([`write::Buf`] / [`write::Write`]).
+pub mod write;
 
 pub use crate::calendar::{Month, Weekday};
 pub use crate::date::Date;

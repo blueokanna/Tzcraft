@@ -11,7 +11,6 @@
 //! the local civil reading and re-anchors, which is the behavior a calendar
 //! user expects.
 
-use alloc::string::String;
 use core::fmt;
 use core::str::FromStr;
 
@@ -25,7 +24,11 @@ use crate::strftime;
 use crate::ticks::Ticks;
 use crate::time::TimeOfDay;
 use crate::units::{Days, Months};
+use crate::write::{with_buf, write_u128, FmtSink};
 use crate::zone::Zone;
+
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 
 /// An instant on the timeline read through a specific [`Zone`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -196,20 +199,29 @@ impl Zoned {
     }
 
     /// RFC 3339 rendering with the local offset designator.
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`Zoned::write_rfc3339`].
+    #[cfg(feature = "alloc")]
     pub fn to_rfc3339(self, fraction: FractionDigits) -> String {
         match self.civil() {
-            Ok(dt) => {
-                let mut out = alloc::string::String::new();
-                format::format_rfc3339_into(
-                    &mut out,
-                    dt.date(),
-                    dt.time(),
-                    self.offset(),
-                    fraction,
-                );
-                out
-            }
+            Ok(dt) => format::format_rfc3339_alloc(dt.date(), dt.time(), self.offset(), fraction)
+                .expect("an RFC 3339 timestamp fits 64 bytes"),
             Err(_) => alloc::format!("{}{}", self.ticks.as_unix_nanos(), self.offset().to_iso()),
+        }
+    }
+
+    /// RFC 3339 rendering into a caller-owned buffer (allocator-free).
+    ///
+    /// Returns the number of bytes written; a 64-byte buffer is always large
+    /// enough.
+    pub fn write_rfc3339(self, out: &mut [u8], fraction: FractionDigits) -> Result<usize> {
+        match self.civil() {
+            Ok(dt) => format::write_rfc3339(out, dt.date(), dt.time(), self.offset(), fraction),
+            Err(_) => with_buf(out, |b| {
+                write_u128(b, self.ticks.as_unix_nanos() as u128)?;
+                format::format_offset_into(b, self.offset())
+            }),
         }
     }
 
@@ -226,8 +238,17 @@ impl Zoned {
     /// `z.format("%Y-%m-%d %H:%M:%S %:z")`.
     ///
     /// The `%`-directive set is documented on [`crate::Ticks::format`].
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`Zoned::write_format`].
+    #[cfg(feature = "alloc")]
     pub fn format(self, fmt: &str) -> Result<String> {
         strftime::format_zoned(self, fmt)
+    }
+
+    /// strftime-style rendering into a caller-owned buffer (allocator-free).
+    pub fn write_format(self, fmt: &str, out: &mut [u8]) -> Result<usize> {
+        strftime::write_zoned(self, fmt, out)
     }
 
     /// Parse with a strftime-style format string (chrono's
@@ -237,10 +258,25 @@ impl Zoned {
     }
 
     /// RFC 2822 rendering in local time (email / HTTP header dates).
+    ///
+    /// This method allocates. The allocator-free equivalent is
+    /// [`Zoned::write_rfc2822`].
+    #[cfg(feature = "alloc")]
     pub fn to_rfc2822(self) -> String {
         match self.civil() {
             Ok(dt) => strftime::format_rfc2822(dt.date(), dt.time(), self.offset()),
             Err(_) => alloc::format!("{}{}", self.ticks.as_unix_nanos(), self.offset().to_iso()),
+        }
+    }
+
+    /// RFC 2822 rendering into a caller-owned buffer (allocator-free).
+    pub fn write_rfc2822(self, out: &mut [u8]) -> Result<usize> {
+        match self.civil() {
+            Ok(dt) => strftime::write_rfc2822(dt.date(), dt.time(), self.offset(), out),
+            Err(_) => with_buf(out, |b| {
+                write_u128(b, self.ticks.as_unix_nanos() as u128)?;
+                format::format_offset_into(b, self.offset())
+            }),
         }
     }
 
@@ -253,7 +289,20 @@ impl Zoned {
 
 impl fmt::Display for Zoned {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_rfc3339(FractionDigits::Auto))
+        match self.civil() {
+            Ok(dt) => {
+                let mut sink = FmtSink(f);
+                format::format_rfc3339_into(
+                    &mut sink,
+                    dt.date(),
+                    dt.time(),
+                    self.offset(),
+                    FractionDigits::Auto,
+                )
+                .map_err(|_| fmt::Error)
+            }
+            Err(_) => write!(f, "{}{}", self.ticks.as_unix_nanos(), self.offset()),
+        }
     }
 }
 
@@ -265,11 +314,12 @@ impl FromStr for Zoned {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "alloc"))]
 mod tests {
     use super::*;
     use crate::error::Error;
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn civil_anchor_and_projection() {
         let zone = Zone::fixed(Offset::from_hms(8, 0, 0).unwrap());
@@ -285,6 +335,7 @@ mod tests {
         assert_eq!(zoned.time().unwrap(), civil.time());
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn zone_aware_month_math() {
         let zone = Zone::fixed(Offset::from_hms(-5, 0, 0).unwrap());
@@ -306,6 +357,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn strftime_round_trips() {
         let z = Zoned::from_rfc3339("2024-06-15T07:00:00+08:00").unwrap();
@@ -330,6 +382,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn rfc3339_round_trips() {
         for s in [
@@ -352,6 +405,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn with_zone_keeps_instant() {
         let z1 = Zoned::from_rfc3339("2024-06-15T12:00:00+08:00").unwrap();
