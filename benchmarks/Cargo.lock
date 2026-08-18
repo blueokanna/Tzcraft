@@ -173,9 +173,9 @@ dependencies = [
 
 [[package]]
 name = "rustbinary"
-version = "0.1.7"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3a4626197e4ea1997c2bcb74b6b54f2606db307d4a0edf1b01c484b4ce8b1ef"
+checksum = "1377ceb0b0e506330e3409fbc3dedb56e5f5f85cdb43c2a8d7cdf9e1b66b578d"
 dependencies = [
  "nextjson",
 ]

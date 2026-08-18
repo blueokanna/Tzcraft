@@ -2,6 +2,7 @@
 name = "tzcraft"
 version = "0.1.1"
 edition = "2021"
+rust-version = "1.81"
 authors = ["blueokanna"]
 license = "Apache-2.0"
 description = "A schema-driven date & time library: one 128-bit nanosecond timeline, a const civil calendar, and codec-aware wire formats on nextjson / rustbinary."
@@ -27,8 +28,18 @@ serde = ["dep:nextjson", "alloc"]
 binary = ["dep:rustbinary", "serde", "alloc"]
 
 [dependencies]
-nextjson = { version = "0.1", features = ["derive"], optional = true }
-rustbinary = { version = "0.1", optional = true, features = ["std"] }
+# The only two dependencies in the crate, both optional. There is no
+# third-party date/time library anywhere in the graph: `tzcraft` is its own
+# implementation of everything it exposes. "Migration" means bringing
+# `chrono` / `time` / `rustix` code *into* `tzcraft` (see the `migration`
+# module and the README), never linking those crates.
+#
+# Exact pins are deliberate: a caret range would let a future release
+# silently raise the MSRV or change wire behaviour. `rustbinary` in
+# particular must not drift: 0.1.7 uses `is_multiple_of` (stabilized in
+# Rust 1.87), which would break the declared MSRV 1.81.
+nextjson = { version = "=0.1.4", features = ["derive"], optional = true }
+rustbinary = { version = "=0.1.6", optional = true, features = ["std"] }
 
 [package.metadata.docs.rs]
 all-features = true
