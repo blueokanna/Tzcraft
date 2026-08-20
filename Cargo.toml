@@ -15,9 +15,9 @@ readme = "README.md"
 exclude = ["wiki/", "benchmarks/"]
 keywords = ["date", "time", "datetime", "timezone", "posix"]
 categories = [
-    "Date and Time",
-    "Value Formatting and Parsing",
-    "Data Processing",
+    "date-and-time",
+    "value-formatting",
+    "development-tools::build-utils",
 ]
 
 [features]
