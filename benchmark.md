@@ -1,7 +1,7 @@
 # tzcraft benchmark report
 
-- date: 2026-08-18T06:28:02Z
-- commit: a2f24a7
+- date: 2026-08-18T06:47:55Z
+- commit: 0f052b0
 - runner: Linux 6.17.0-1022-azure x86_64
 
 - target: `x86_64-linux`
@@ -12,13 +12,13 @@
 
 | operation | tzcraft | chrono | time | jiff | tzcraft vs fastest |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| parse RFC 3339 (Z) | 37.6 | 166.0 | 27.4 | 72.5 | 1.37× |
-| parse RFC 3339 (+08:00) | 50.1 | 35.5 | 29.5 | 76.8 | 1.70× |
-| format RFC 3339 (String) | 77.6 | 83.4 | 24.1 | 62.5 | 3.21× |
-| format RFC 3339 (stack buffer) | 56.9 | — | — | — | **fastest** |
-| instant → civil (y/m/d/h) | 24.1 | 2.7 | 5.1 | 6.7 | 8.99× |
+| parse RFC 3339 (Z) | 37.4 | 163.5 | 27.4 | 72.4 | 1.37× |
+| parse RFC 3339 (+08:00) | 52.6 | 35.5 | 29.4 | 77.4 | 1.79× |
+| format RFC 3339 (String) | 79.0 | 85.5 | 24.3 | 62.8 | 3.25× |
+| format RFC 3339 (stack buffer) | 57.1 | — | — | — | **fastest** |
+| instant → civil (y/m/d/h) | 23.9 | 3.0 | 5.1 | 6.7 | 7.87× |
 | date + 1 day | 0.7 | 2.6 | 1.2 | 4.9 | **fastest** |
-| date + 1 month (clamping) | 31.1 | 10.0 | — | 21.8 | 3.11× |
+| date + 1 month (clamping) | 31.1 | 10.0 | — | 21.9 | 3.11× |
 | duration + 90 s | 1.2 | 2.9 | 2.5 | 44.8 | **fastest** |
 | weekday | 2.3 | 1.3 | 5.7 | 3.6 | 1.76× |
 
