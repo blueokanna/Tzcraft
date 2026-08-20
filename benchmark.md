@@ -42,7 +42,7 @@ Deterministic fuzz corpus of 1100 strings (malformed dates, out-of-range compone
 | | tzcraft 0.1.1 | chrono 0.4.45 | time 0.3.55 | jiff 0.2.35 |
 | --- | --- | --- | --- | --- |
 | instant storage | `i128` ns since epoch | `i64` s + `u32` ns | `i64` ns of day + offset | `i64` s + `i64` ns |
-| range | ≈ ±292 billion years | ≈ ±262,000 years | years 0000–9999 default (`large-dates` extends to ±999,999) | ≈ ±292 billion years (`i64` ns) |
+| range | ≈ ±5.4×10^21 years | ≈ ±262,000 years | years 0000–9999 default (`large-dates` extends to ±999,999) | ≈ ±292 billion years (`i64` s) |
 | Y2038-safe | yes (no 32-bit seconds) | yes | yes | yes |
 | overflow model | `checked_*` returns `Result`; unit constructors compute in `i128` | `checked_*` returns `Option`/`Result`; `TimeDelta` is `i64` ns | `checked_*` returns `Result` | `checked_*` returns `Result` |
 | `no_std` | yes, and **no allocator** with `--no-default-features` | yes, with `alloc` | yes, with `alloc` | yes, with `alloc` (std typical) |

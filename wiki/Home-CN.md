@@ -22,7 +22,7 @@ English readers: see [Home](Home).
 
 ## 一句话版本
 
-- `Ticks` 是唯一的瞬时类型：Unix 纪元起的有符号 128 位纳秒计数。量程约 ±2920 亿年，完整纳秒精度。
+- `Ticks` 是唯一的瞬时类型：Unix 纪元起的有符号 128 位纳秒计数。存储量程约 ±5.4×10^21 年（`i64` 秒访问器把可用范围界定在约 ±2920 亿年），完整纳秒精度。
 - `Date`、`TimeOfDay`、`CivilDateTime` 是这根时间轴的纯投影，不持有自己的算术。
 - 所有公历计算都是 `const fn`；时区是 `const` 数据（`Zone::Utc` 或固定 `Offset`）。
 - crate 在任何配置下都是 `#![no_std]`，`--no-default-features` 时完全不依赖分配器。

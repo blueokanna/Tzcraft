@@ -23,6 +23,12 @@ use alloc::string::String;
 pub struct Duration(i128);
 
 impl Duration {
+    /// Smallest representable duration.
+    pub const MIN: Duration = Duration(i128::MIN);
+
+    /// Largest representable duration.
+    pub const MAX: Duration = Duration(i128::MAX);
+
     /// Zero length.
     pub const ZERO: Duration = Duration(0);
 
@@ -33,22 +39,36 @@ impl Duration {
 
     /// Build from microseconds.
     ///
-    /// `micros` must be small enough that `micros * 1_000` fits the `i128`
-    /// nanosecond range (|micros| < 1.7×10^35); the multiplication is the
-    /// unchecked const arithmetic shared by every `const fn` constructor.
+    /// Values outside the nanosecond range saturate at [`Duration::MIN`] or
+    /// [`Duration::MAX`] instead of wrapping or panicking.
     pub const fn from_micros(micros: i128) -> Duration {
-        Duration(micros * 1_000)
+        Duration(micros.saturating_mul(1_000))
+    }
+
+    /// Build from microseconds, returning an error when scaling would
+    /// overflow the nanosecond representation.
+    pub fn checked_from_micros(micros: i128) -> Result<Duration> {
+        micros
+            .checked_mul(1_000)
+            .map(Duration)
+            .ok_or_else(Error::overflow)
     }
 
     /// Build from milliseconds.
     ///
-    /// `millis` must be small enough that `millis * 1_000_000` fits the
-    /// `i128` nanosecond range (|millis| < 1.7×10^29); the multiplication is
-    /// the unchecked const arithmetic shared by every `const fn`
-    /// constructor. This mirrors the behaviour of `chrono`/`time`, whose
-    /// unit-scaled constructors also assume an in-range argument.
+    /// Values outside the nanosecond range saturate at [`Duration::MIN`] or
+    /// [`Duration::MAX`] instead of wrapping or panicking.
     pub const fn from_millis(millis: i128) -> Duration {
-        Duration(millis * 1_000_000)
+        Duration(millis.saturating_mul(1_000_000))
+    }
+
+    /// Build from milliseconds, returning an error when scaling would
+    /// overflow the nanosecond representation.
+    pub fn checked_from_millis(millis: i128) -> Result<Duration> {
+        millis
+            .checked_mul(1_000_000)
+            .map(Duration)
+            .ok_or_else(Error::overflow)
     }
 
     /// Build from whole seconds.
@@ -262,18 +282,24 @@ impl Duration {
 
     /// Checked scalar division (truncates toward zero).
     pub fn checked_div(self, rhs: i128) -> Result<Duration> {
-        if rhs == 0 {
-            return Err(Error::invalid("division by zero"));
-        }
-        Ok(Duration(self.0 / rhs))
+        self.0.checked_div(rhs).map(Duration).ok_or_else(|| {
+            if rhs == 0 {
+                Error::invalid("division by zero")
+            } else {
+                Error::overflow()
+            }
+        })
     }
 
     /// Checked duration ratio (truncates toward zero).
     pub fn checked_div_duration(self, rhs: Duration) -> Result<i128> {
-        if rhs.0 == 0 {
-            return Err(Error::invalid("division by zero"));
-        }
-        Ok(self.0 / rhs.0)
+        self.0.checked_div(rhs.0).ok_or_else(|| {
+            if rhs.0 == 0 {
+                Error::invalid("division by zero")
+            } else {
+                Error::overflow()
+            }
+        })
     }
 
     /// Saturating addition.
@@ -396,6 +422,25 @@ mod tests {
         assert_eq!(Duration::days(i64::MAX), Duration::from_days(i64::MAX));
         assert_eq!(Duration::from_days(-1).as_nanos(), -NS_PER_DAY);
         assert_eq!(Duration::from_minutes(-1).as_nanos(), -NS_PER_MIN);
+        assert_eq!(Duration::from_micros(i128::MAX), Duration::MAX);
+        assert_eq!(Duration::from_micros(i128::MIN), Duration::MIN);
+        assert_eq!(Duration::from_millis(i128::MAX), Duration::MAX);
+        assert_eq!(Duration::from_millis(i128::MIN), Duration::MIN);
+        assert!(Duration::checked_from_micros(i128::MAX).is_err());
+        assert!(Duration::checked_from_millis(i128::MIN).is_err());
+    }
+
+    #[test]
+    fn checked_division_never_panics_at_integer_extremes() {
+        assert!(Duration::MIN.checked_div(-1).is_err());
+        assert!(Duration::MIN
+            .checked_div_duration(Duration::from_nanos(-1))
+            .is_err());
+        assert!(Duration::from_nanos(1).checked_div(0).is_err());
+        assert_eq!(
+            Duration::from_seconds(10).checked_div(2).unwrap(),
+            Duration::from_seconds(5)
+        );
     }
 
     #[test]
@@ -438,7 +483,21 @@ mod tests {
     #[test]
     fn iso_rejects_calendar_ambiguous() {
         for s in [
-            "P1Y", "P1M", "P", "PT", "P1S", "P1DT", "P1DT5", "abc", "PT1H2D",
+            "P1Y",
+            "P1M",
+            "P",
+            "PT",
+            "P1S",
+            "P1DT",
+            "P1DT5",
+            "abc",
+            "PT1H2D",
+            "P1W1D",
+            "P1WT1H",
+            "P1D1D",
+            "PT1S1H",
+            "PT1H1H",
+            "PT1.5H30M",
         ] {
             assert!(Duration::from_iso8601(s).is_err(), "{s} should fail");
         }

@@ -37,6 +37,10 @@ Previous audit rounds found and fixed, with regression tests:
    `checked_add` chains.
 4. `%s` formatting narrowed nanoseconds to `i64` seconds and wrapped for
    extreme instants. Fixed to render nothing for out-of-range values.
+5. The extreme-instant fallback of `Ticks`/`Zoned::write_rfc3339` and
+   `write_rfc2822` cast negative `i128` instants with `as u128`, wrapping
+   them into a huge positive on the wire. Fixed with a sign-aware emitter
+   so the allocating and buffer paths agree.
 
 The remaining `unwrap`/`expect`/`panic!` sites in non-test code are
 invariant-based (a validated `TimeOfDay` is always a valid `chrono::NaiveTime`

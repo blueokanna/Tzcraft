@@ -8,7 +8,7 @@
 
 use core::fmt;
 
-use crate::calendar::{days_from_civil, weekday_from_civil, Weekday};
+use crate::calendar::{days_from_civil, iso_week_from_civil, weekday_from_civil, Weekday};
 use crate::date::Date;
 use crate::error::{Error, Result};
 
@@ -80,7 +80,8 @@ impl IsoWeek {
     /// The resulting date lives in the ISO year (which may differ from the
     /// calendar year at the boundaries).
     pub fn monday(self) -> Result<Date> {
-        if !(1..=53).contains(&self.week) {
+        let max_week = iso_week_from_civil(self.year, 12, 28).1;
+        if self.week == 0 || self.week > max_week {
             return Err(Error::out_of_range("iso week"));
         }
         // Week 1 of the ISO year is the week containing January 4.
@@ -116,5 +117,6 @@ mod tests {
         assert_eq!(w.monday().unwrap(), Date::from_ymd(2025, 12, 29).unwrap());
         assert_eq!(w.to_string(), "2026-W01");
         assert!(IsoWeek::new(2024, 54).monday().is_err());
+        assert!(IsoWeek::new(2021, 53).monday().is_err());
     }
 }

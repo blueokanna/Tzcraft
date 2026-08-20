@@ -21,6 +21,7 @@
 
 use core::cmp::Ordering;
 use core::fmt;
+use core::hash::{Hash, Hasher};
 use core::str::FromStr;
 
 use crate::error::{Error, Result};
@@ -32,7 +33,7 @@ use crate::write::{with_buf, FmtSink, Write};
 use alloc::string::String;
 
 /// A timezone: UTC or a fixed offset.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug)]
 pub enum Zone {
     /// The canonical UTC zone.
     Utc,
@@ -76,15 +77,21 @@ impl Zone {
         }
     }
 
+    /// Whether this zone has a zero UTC offset.
+    pub const fn is_utc(self) -> bool {
+        self.offset().is_utc()
+    }
+
     /// ISO 8601 rendering: `UTC` or the offset string.
     ///
     /// This method allocates. The allocator-free equivalent is
     /// [`Zone::write_iso`].
     #[cfg(feature = "alloc")]
     pub fn to_iso(self) -> String {
-        match self {
-            Zone::Utc => alloc::string::String::from("UTC"),
-            Zone::Fixed(offset) => format::format_offset(offset),
+        if self.is_utc() {
+            alloc::string::String::from("UTC")
+        } else {
+            format::format_offset(self.offset())
         }
     }
 
@@ -93,9 +100,12 @@ impl Zone {
     /// Returns the number of bytes written; a 10-byte buffer is always large
     /// enough.
     pub fn write_iso(self, out: &mut [u8]) -> Result<usize> {
-        with_buf(out, |b| match self {
-            Zone::Utc => b.write_str("UTC"),
-            Zone::Fixed(offset) => format::format_offset_into(b, offset),
+        with_buf(out, |b| {
+            if self.is_utc() {
+                b.write_str("UTC")
+            } else {
+                format::format_offset_into(b, self.offset())
+            }
         })
     }
 
@@ -110,13 +120,26 @@ impl Zone {
 
 impl fmt::Display for Zone {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Zone::Utc => f.write_str("UTC"),
-            Zone::Fixed(offset) => {
-                let mut sink = FmtSink(f);
-                format::format_offset_into(&mut sink, offset).map_err(|_| fmt::Error)
-            }
+        if self.is_utc() {
+            f.write_str("UTC")
+        } else {
+            let mut sink = FmtSink(f);
+            format::format_offset_into(&mut sink, self.offset()).map_err(|_| fmt::Error)
         }
+    }
+}
+
+impl PartialEq for Zone {
+    fn eq(&self, other: &Zone) -> bool {
+        self.offset() == other.offset()
+    }
+}
+
+impl Eq for Zone {}
+
+impl Hash for Zone {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.offset().hash(state);
     }
 }
 
@@ -148,6 +171,7 @@ mod tests {
     #[test]
     fn normalization_and_equality() {
         assert_eq!(Zone::fixed(Offset::UTC), Zone::Utc);
+        assert_eq!(Zone::Fixed(Offset::UTC), Zone::Utc);
         assert_eq!(Zone::from_name("UTC"), Some(Zone::Utc));
         assert_eq!(Zone::from_name("CST"), None);
         let z = Zone::fixed(Offset::from_hms(8, 0, 0).unwrap());
@@ -163,6 +187,7 @@ mod tests {
         }
         // "Z" parses as UTC but canonicalizes to "UTC" on output.
         assert_eq!(Zone::from_iso("Z").unwrap(), Zone::Utc);
+        assert_eq!(Zone::Fixed(Offset::UTC).to_iso(), "UTC");
         assert!(Zone::from_iso("+24:00").is_err());
     }
 

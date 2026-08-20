@@ -24,10 +24,11 @@ use alloc::string::String;
 /// A minimal byte-oriented output sink.
 ///
 /// The required method is [`Write::write_bytes`]; `write_str`, `write_byte`
-/// and `write_char` have default implementations on top of it.
+/// and `write_char` have default implementations on top of it. Text sinks
+/// such as [`Buf`] reject byte slices that are not independently valid UTF-8.
 pub trait Write {
-    /// Append a raw byte slice. The bytes are *not* interpreted, so callers
-    /// must only hand over valid UTF-8 if the sink is later read as text.
+    /// Append a UTF-8 byte slice. Implementations used as text sinks return
+    /// an error for invalid UTF-8.
     fn write_bytes(&mut self, bytes: &[u8]) -> Result<()>;
 
     /// Append a `&str` (its UTF-8 encoding is written verbatim).
@@ -126,6 +127,7 @@ impl<'a> Buf<'a> {
 impl Write for Buf<'_> {
     #[inline]
     fn write_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        core::str::from_utf8(bytes).map_err(|_| Error::invalid("invalid utf-8"))?;
         let end = self
             .len
             .checked_add(bytes.len())
@@ -242,6 +244,23 @@ pub(crate) fn write_u128(out: &mut dyn Write, mut value: u128) -> Result<()> {
     Ok(())
 }
 
+/// Emit a signed 128-bit value with no padding.
+///
+/// Unlike `value as u128` (which wraps negatives modulo 2^128 into a huge
+/// positive), this emits a leading `-` for negative values, mirroring what
+/// `alloc::format!("{}", value)` would produce. Used by the extreme-instant
+/// fallback paths of `Ticks::write_rfc3339` / `Ticks::write_rfc2822` so they
+/// stay consistent with their allocating counterparts.
+#[inline]
+pub(crate) fn write_signed_i128(out: &mut dyn Write, value: i128) -> Result<()> {
+    if value < 0 {
+        out.write_byte(b'-')?;
+        write_u128(out, value.unsigned_abs())
+    } else {
+        write_u128(out, value as u128)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,6 +278,8 @@ mod tests {
         assert_eq!(buf.as_str(), "abcdé");
         // Overflow is an error, not a panic or a silent truncation.
         assert!(buf.write_str("xyz").is_err());
+        assert_eq!(buf.as_str(), "abcdé");
+        assert!(buf.write_bytes(&[0xff]).is_err());
         assert_eq!(buf.as_str(), "abcdé");
         buf.clear();
         assert!(buf.is_empty());

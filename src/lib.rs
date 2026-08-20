@@ -7,7 +7,7 @@
 //! **1. One timeline.** [`Ticks`] is the only type that does instant
 //! arithmetic: a signed 128-bit nanosecond counter since the Unix epoch.
 //! That single width buys full nanosecond precision *and* a range of roughly
-//! ±292 billion years, so there is no "small instant / large instant" split
+//! ±5.4×10^21 years, so there is no "small instant / large instant" split
 //! and no overflow-collapse strategy to learn. [`Duration`] is a distinct
 //! signed span type — you cannot add two instants, the type system says so.
 //!
@@ -150,6 +150,9 @@ mod datetime;
 mod duration;
 mod error;
 mod format;
+/// Migration guide: bringing `chrono` / `time` / `rustix` code in
+/// (documentation only, no code).
+pub mod migration;
 mod offset;
 mod strftime;
 mod ticks;

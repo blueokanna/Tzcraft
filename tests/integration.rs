@@ -47,6 +47,7 @@ fn json_round_trips_every_type() {
     json_round_trip(&Offset::from_hms(-5, 30, 0).unwrap());
     json_round_trip(&Zone::fixed(Offset::from_hms(8, 0, 0).unwrap()));
     json_round_trip(&Zone::Utc);
+    json_round_trip(&Zone::Fixed(Offset::UTC));
     json_round_trip(&Zoned::from_rfc3339("2024-06-15T12:00:00+08:00").unwrap());
     json_round_trip(&Zoned::from_rfc3339("2024-06-15T12:00:00Z").unwrap());
     json_round_trip(&Weekday::Friday);
@@ -63,6 +64,7 @@ fn binary_round_trips_every_type() {
     bin_round_trip(&Offset::from_hms(-5, 30, 0).unwrap());
     bin_round_trip(&Zone::fixed(Offset::from_hms(8, 0, 0).unwrap()));
     bin_round_trip(&Zone::Utc);
+    bin_round_trip(&Zone::Fixed(Offset::UTC));
     bin_round_trip(&Zoned::from_rfc3339("2024-06-15T12:00:00+08:00").unwrap());
     bin_round_trip(&Weekday::Sunday);
     bin_round_trip(&Month::February);

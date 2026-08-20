@@ -96,7 +96,10 @@ impl Date {
     /// Build a date from days since the Common Era epoch `0001-01-01`
     /// (chrono's `from_num_days_from_ce`).
     pub fn from_num_days_from_ce(days: i64) -> Result<Date> {
-        Date::from_days_checked(days - DAYS_0001_TO_1970)
+        let epoch_days = days
+            .checked_sub(DAYS_0001_TO_1970)
+            .ok_or_else(Error::overflow)?;
+        Date::from_days_checked(epoch_days)
     }
 
     /// Today's date in UTC (requires the `std` feature).
@@ -377,16 +380,22 @@ impl Date {
         self.checked_sub_days(Days::new(diff as u64))
     }
 
-    /// The first day of the current month.
+    /// The first representable day of the current month.
+    ///
+    /// At [`Date::MIN`], this clamps to `MIN` when the true month boundary is
+    /// outside the type's range.
     pub fn first_day_of_month(self) -> Date {
         let (y, m, _) = self.parts();
-        Date(days_from_civil(y, m, 1) as i32)
+        Date::from_days_checked(days_from_civil(y, m, 1)).unwrap_or(Date::MIN)
     }
 
-    /// The last day of the current month.
+    /// The last representable day of the current month.
+    ///
+    /// At [`Date::MAX`], this clamps to `MAX` when the true month boundary is
+    /// outside the type's range.
     pub fn last_day_of_month(self) -> Date {
         let (y, m, _) = self.parts();
-        Date(days_from_civil(y, m, days_in_month(y, m)) as i32)
+        Date::from_days_checked(days_from_civil(y, m, days_in_month(y, m))).unwrap_or(Date::MAX)
     }
 
     /// Strict ISO 8601 rendering (`YYYY-MM-DD`, expanded-year sign as needed).
@@ -484,6 +493,8 @@ mod tests {
             Date::from_num_days_from_ce(719_162).unwrap(),
             Date::from_ymd(1970, 1, 1).unwrap()
         );
+        assert!(Date::from_num_days_from_ce(i64::MIN).is_err());
+        assert!(Date::from_isoywd(2021, 53, Weekday::Monday).is_err());
     }
 
     #[test]
@@ -604,6 +615,8 @@ mod tests {
         let d = Date::from_ymd(2024, 2, 15).unwrap();
         assert_eq!(d.first_day_of_month(), Date::from_ymd(2024, 2, 1).unwrap());
         assert_eq!(d.last_day_of_month(), Date::from_ymd(2024, 2, 29).unwrap());
+        assert_eq!(Date::MIN.first_day_of_month(), Date::MIN);
+        assert_eq!(Date::MAX.last_day_of_month(), Date::MAX);
     }
 
     #[cfg(feature = "alloc")]

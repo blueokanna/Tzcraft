@@ -59,7 +59,7 @@ RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features --no-deps
 
 ```toml
 nextjson = { version = "=0.1.4", features = ["derive"], optional = true }
-rustbinary = { version = "=0.1.7", optional = true, features = ["std"] }
+rustbinary = { version = "=0.1.6", optional = true, features = ["std"] }
 ```
 
 依赖图中**没有任何第三方日期时间库**：`migration` 模块只是文档。精确锁定（`=`）保证 MSRV 与线格式行为可复现，是刻意的：caret 范围会让未来版本悄悄抬高 MSRV 或改变本 crate 依赖的行为。

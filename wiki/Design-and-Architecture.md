@@ -11,9 +11,10 @@ slogan.
 `1970-01-01T00:00:00Z` (proleptic Gregorian). The width is the design:
 
 - **Precision.** Nanosecond resolution for every representable instant.
-- **Range.** `i128` nanoseconds spans roughly ±292 billion years. There is
-  no "small instant / large instant" split, no overflow-collapse strategy,
-  no second type to remember.
+- **Range.** `i128` nanoseconds spans roughly ±5.4×10^21 years (the
+  `i64`-second accessors bound the usable range to ≈ ±292 billion years).
+  There is no "small instant / large instant" split, no overflow-collapse
+  strategy, no second type to remember.
 
 `Duration` is a distinct signed span type (`i128` nanoseconds too, so the
 conversion is free). Because the types are distinct, `Ticks + Ticks` does

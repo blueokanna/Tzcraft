@@ -50,7 +50,7 @@ use crate::time::TimeOfDay;
 use crate::units::{Days, IsoWeek};
 #[cfg(feature = "alloc")]
 use crate::write::alloc_string;
-use crate::write::{with_buf, write_u128, Write};
+use crate::write::{with_buf, write_signed_i128, write_u128, Write};
 use crate::zone::Zone;
 use crate::zoned::Zoned;
 
@@ -184,10 +184,17 @@ fn week_of_year_mon(y: i32, m: u32, d: u32) -> u32 {
     }
 }
 
+const MAX_FORMAT_WIDTH: u32 = 1_024;
+
 fn parse_width(bytes: &[u8]) -> Result<u32> {
     let text = core::str::from_utf8(bytes).map_err(|_| Error::invalid("format width"))?;
-    text.parse()
-        .map_err(|_| Error::invalid("format width out of range"))
+    let width = text
+        .parse()
+        .map_err(|_| Error::invalid("format width out of range"))?;
+    if width > MAX_FORMAT_WIDTH {
+        return Err(Error::invalid("format width exceeds 1024"));
+    }
+    Ok(width)
 }
 
 /// Format `p` according to the strftime-style `fmt` string into `out`.
@@ -197,8 +204,13 @@ pub(crate) fn format_parts_into(out: &mut dyn Write, fmt: &str, p: &Parts) -> Re
     while i < b.len() {
         let c = b[i];
         if c != b'%' {
-            out.write_byte(c)?;
-            i += 1;
+            let start = i;
+            while i < b.len() && b[i] != b'%' {
+                i += 1;
+            }
+            let literal = core::str::from_utf8(&b[start..i])
+                .map_err(|_| Error::invalid("invalid utf-8 in format string"))?;
+            out.write_str(literal)?;
             continue;
         }
         i += 1;
@@ -282,7 +294,7 @@ fn emit_directive(out: &mut dyn Write, d: u8, pad: u8, width: usize, p: &Parts) 
     match d {
         b'Y' => emit_signed(out, year, width.max(4), pad)?,
         b'y' => pad_num(out, year.rem_euclid(100) as u64, 2, pad)?,
-        b'C' => pad_num(out, year.div_euclid(100) as u64, 2, pad)?,
+        b'C' => emit_signed(out, year.div_euclid(100), 2, pad)?,
         b'm' => pad_num(out, p.month as u64, 2, pad)?,
         b'd' => pad_num(out, p.day as u64, 2, pad)?,
         b'e' => pad_num(out, p.day as u64, 2, b' ')?,
@@ -319,7 +331,7 @@ fn emit_directive(out: &mut dyn Write, d: u8, pad: u8, width: usize, p: &Parts) 
         }
         b's' => {
             if let Some(ts) = p.timestamp {
-                write_u128(out, ts as u128)?;
+                write_signed_i128(out, ts as i128)?;
             }
         }
         b'n' => out.write_byte(b'\n')?,
@@ -1225,10 +1237,7 @@ pub(crate) fn format_ticks(ticks: Ticks, fmt: &str) -> Result<String> {
 /// buffer.
 pub(crate) fn write_zoned(zoned: Zoned, fmt: &str, out: &mut [u8]) -> Result<usize> {
     let dt = zoned.civil()?;
-    let zone_name = match zoned.zone() {
-        Zone::Utc => Some("UTC"),
-        Zone::Fixed(_) => None,
-    };
+    let zone_name = zoned.zone().is_utc().then_some("UTC");
     let mut p = parts_from_civil(dt, Some(zoned.offset()), zone_name);
     p.timestamp = i64::try_from(floor_div_ns(zoned.ticks().as_unix_nanos(), NS_PER_SEC)).ok();
     with_buf(out, |b| format_parts_into(b, fmt, &p))
@@ -1237,10 +1246,7 @@ pub(crate) fn write_zoned(zoned: Zoned, fmt: &str, out: &mut [u8]) -> Result<usi
 #[cfg(feature = "alloc")]
 pub(crate) fn format_zoned(zoned: Zoned, fmt: &str) -> Result<String> {
     let dt = zoned.civil()?;
-    let zone_name = match zoned.zone() {
-        Zone::Utc => Some("UTC"),
-        Zone::Fixed(_) => None,
-    };
+    let zone_name = zoned.zone().is_utc().then_some("UTC");
     let mut p = parts_from_civil(dt, Some(zoned.offset()), zone_name);
     p.timestamp = i64::try_from(floor_div_ns(zoned.ticks().as_unix_nanos(), NS_PER_SEC)).ok();
     format_parts(fmt, &p)
@@ -1266,13 +1272,15 @@ pub(crate) fn parse_ticks(fmt: &str, s: &str) -> Result<Ticks> {
 
 pub(crate) fn parse_zoned(fmt: &str, s: &str) -> Result<Zoned> {
     let pp = parse_parts(fmt, s)?;
-    let offset = pp.offset.unwrap_or(Offset::UTC);
     if let Some(ts) = pp.timestamp {
         return Ok(Zoned::new(
             Ticks::from_timestamp(ts, 0)?,
-            Zone::fixed(offset),
+            Zone::fixed(pp.offset.unwrap_or(Offset::UTC)),
         ));
     }
+    let offset = pp
+        .offset
+        .ok_or_else(|| Error::invalid("missing timezone offset"))?;
     let (date, time) = pp.to_civil()?;
     Zoned::from_civil(CivilDateTime::new(date, time), Zone::fixed(offset))
 }

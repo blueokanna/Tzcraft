@@ -70,7 +70,7 @@ Both dependencies are optional and exact-pinned:
 
 ```toml
 nextjson = { version = "=0.1.4", features = ["derive"], optional = true }
-rustbinary = { version = "=0.1.7", optional = true, features = ["std"] }
+rustbinary = { version = "=0.1.6", optional = true, features = ["std"] }
 ```
 
 There is **no third-party date/time library** in the dependency graph: the

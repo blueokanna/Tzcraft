@@ -23,6 +23,7 @@
 2. `Ticks`/`Zoned::checked_add_days(Days)` 把超过 `i64` 的 `u64` 天数窄化成负数。修复：显式 `i64::try_from`。
 3. `Ticks::duration_since` 与 `CivilDateTime::checked_add` 有未检查的 `i128` 加法（`MAX - MIN` 溢出）。修复：`saturating_sub` 与 `checked_add` 链。
 4. `%s` 格式化把纳秒窄化成 `i64` 秒，极端瞬时回绕。修复：越界时渲染为空。
+5. `Ticks`/`Zoned::write_rfc3339` 与 `write_rfc2822` 的极端瞬时 fallback 用 `as u128` 转换负 `i128`，把负数回绕成线上的巨大正数。修复：改用带符号的发射器，使分配版与缓冲版输出一致。
 
 非测试代码中剩余的 `unwrap`/`expect`/`panic!` 都是基于不变量的（校验过的 `TimeOfDay` 永远是合法的 `chrono::NaiveTime`/`time::Time`；新 `String` 不会溢出；`Buf` 只持有合法 UTF-8），或是文档化的 const 构造器 panic（`Offset::east`/`west`，与 `chrono::FixedOffset::east` 一致）。
 

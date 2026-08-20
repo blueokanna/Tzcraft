@@ -31,8 +31,8 @@ the code you can check yourself.
 **1. One timeline, one source of arithmetic.**
 `Ticks` is the only instant type: a signed 128-bit nanosecond count since
 the Unix epoch (`1970-01-01T00:00:00Z`). 128 bits buys full nanosecond
-precision *and* a range of roughly ±292 billion years — no "small instant /
-big instant" split, no overflow-collapse strategy to memorize. `Duration` is
+precision *and* a storage range of roughly ±5.4×10^21 years — no "small
+instant / big instant" split, no overflow-collapse strategy to memorize. `Duration` is
 a separate *signed* span type: the type system refuses to let you add two
 instants, because `Ticks + Ticks` does not compile.
 
@@ -178,8 +178,9 @@ The Year 2038 problem is a 32-bit signed-seconds overflow
 (`i32::MAX` seconds after the epoch = `2038-01-19T03:14:07Z`). `tzcraft`
 cannot hit it:
 
-- `Ticks` is `i128` nanoseconds since the epoch — range ≈ ±292 billion
-  years;
+- `Ticks` is `i128` nanoseconds since the epoch — storage range ≈ ±5.4×10^21
+  years (the `i64`-second accessors bound the usable range to ≈ ±292 billion
+  years);
 - every `timestamp*` accessor and `from_timestamp*` constructor uses `i64`
   seconds — range ≈ ±292 billion years;
 - `Date` is `i32` **days** since the epoch (≈ ±5.8 million years), never
@@ -330,9 +331,11 @@ rejected, never truncated. Truncation would be lying about the data.
   `Duration::from_days/minutes/hours/weeks` (an `i64` multiply that panicked
   in debug and wrapped in release at `i64::MAX`), a narrowing wrap in
   `Ticks`/`Zoned::checked_add_days(Days)` for `u64` day counts past `i64`,
-  unchecked `i128` additions in `duration_since` and `checked_add`, and an
-  `as i64` wrap when formatting `%s` for extreme instants. Regression tests
-  lock each one down.
+  unchecked `i128` additions in `duration_since` and `checked_add`, an
+  `as i64` wrap when formatting `%s` for extreme instants, and an `as u128`
+  wrap in the extreme-instant fallbacks of `write_rfc3339` / `write_rfc2822`
+  (and their `Zoned` twins) that turned negative instants into huge
+  positives on the wire. Regression tests lock each one down.
 - Dependencies: `cargo audit` reports zero known vulnerabilities.
 
 ```sh

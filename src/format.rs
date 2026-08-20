@@ -592,10 +592,15 @@ pub(crate) fn parse_duration_iso(s: &str) -> Result<Duration> {
     let mut total: i128 = 0;
     let mut saw_component = false;
     let mut saw_t = false;
+    let mut saw_week = false;
+    let mut saw_day = false;
 
     // Pre-T components: W, D.
     loop {
         if sc.peek() == Some(b'T') {
+            if saw_week {
+                return sc.err("week duration cannot contain time components");
+            }
             sc.pos += 1;
             saw_t = true;
             break;
@@ -604,35 +609,49 @@ pub(crate) fn parse_duration_iso(s: &str) -> Result<Duration> {
             break;
         }
         let (int, frac, digits) = parse_duration_number(&mut sc)?;
-        let unit = match sc.bump() {
-            Some(b'W') => 7 * NS_PER_DAY,
-            Some(b'D') => NS_PER_DAY,
+        let (unit, is_week) = match sc.bump() {
+            Some(b'W') if !saw_week && !saw_day => (7 * NS_PER_DAY, true),
+            Some(b'D') if !saw_week && !saw_day => (NS_PER_DAY, false),
+            Some(b'W') | Some(b'D') => return sc.err("duplicate or mixed date duration unit"),
             Some(_) => return sc.err("expected 'W' or 'D' before 'T'"),
             None => return sc.err("expected a unit after the number"),
         };
         total = add_duration_component(total, int, frac, digits, unit)?;
+        saw_week = is_week;
+        saw_day = !is_week;
         saw_component = true;
+        if digits > 0 && !sc.at_end() {
+            return sc.err("fraction is only allowed on the final component");
+        }
     }
 
     // Post-T components: H, M, S. A `T` without a single time component is
     // malformed (`P1DT`), so track that the section actually produced one.
     let mut post_components = 0usize;
+    let mut last_rank = 4u8;
     loop {
         if sc.at_end() {
             break;
         }
         let (int, frac, digits) = parse_duration_number(&mut sc)?;
-        let unit = match sc.bump() {
-            Some(b'H') => NS_PER_HOUR,
-            Some(b'M') => NS_PER_MIN,
-            Some(b'S') => NS_PER_SEC,
+        let (unit, rank) = match sc.bump() {
+            Some(b'H') => (NS_PER_HOUR, 3),
+            Some(b'M') => (NS_PER_MIN, 2),
+            Some(b'S') => (NS_PER_SEC, 1),
             Some(b'W') | Some(b'D') => return sc.err("'W'/'D' are not allowed after 'T'"),
             Some(_) => return sc.err("expected 'H', 'M' or 'S' after 'T'"),
             None => return sc.err("expected a unit after the number"),
         };
+        if rank >= last_rank {
+            return sc.err("duplicate or out-of-order time duration unit");
+        }
+        last_rank = rank;
         total = add_duration_component(total, int, frac, digits, unit)?;
         saw_component = true;
         post_components += 1;
+        if digits > 0 && !sc.at_end() {
+            return sc.err("fraction is only allowed on the final component");
+        }
     }
 
     if saw_t && post_components == 0 {

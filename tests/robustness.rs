@@ -120,6 +120,9 @@ fn malformed_is_rejected_not_ignored() {
     assert!(Ticks::from_rfc3339("2024-01-01T00:00:00").is_err()); // missing offset
     assert!(Ticks::from_rfc3339("2024-01-01T24:00:00Z").is_err());
     assert!(Duration::from_iso8601("P1Y").is_err());
+    assert!(Duration::from_iso8601("PT1S1H").is_err());
+    assert!(Date::from_isoywd(2021, 53, tzcraft::Weekday::Monday).is_err());
+    assert!(Zoned::parse_from_str("2024-01-01 00:00:00", "%Y-%m-%d %H:%M:%S").is_err());
     // Unknown timezone name in RFC 2822.
     assert!(Zoned::from_rfc2822("Mon, 1 Jan 2024 00:00:00 XYZ").is_err());
 }
@@ -158,6 +161,7 @@ fn malicious_format_strings_never_panic() {
         "%%.f".to_string(),
         "%999f".to_string(),
     ];
+    assert!(d.format("%1025Y").is_err());
     for s in &corpus {
         let _ = d.format(s);
         let _ = dt.format(s);
@@ -222,6 +226,62 @@ fn extreme_values_are_checked_not_wrapped() {
 }
 
 #[test]
+fn extreme_fallback_formatting_is_consistent() {
+    // Instants whose day count exceeds i64 fall back to a raw nanosecond
+    // count + `s`. The allocating and buffer APIs must agree, including the
+    // sign of negative instants (`as u128` would wrap them into a huge
+    // positive; a regression test for that bug).
+    for extreme in [
+        Ticks::from_unix_nanos(-(i128::MAX / 2)),
+        Ticks::from_unix_nanos(i128::MAX / 2),
+        Ticks::MIN,
+        Ticks::MAX,
+        Ticks::from_unix_nanos(-(1i128 << 100)),
+        Ticks::from_unix_nanos(1i128 << 100),
+    ] {
+        for f in [tzcraft::FractionDigits::None, tzcraft::FractionDigits::Auto] {
+            let a = extreme.to_rfc3339(f);
+            let mut buf = [0u8; 64];
+            let n = extreme.write_rfc3339(&mut buf, f).unwrap();
+            let b = core::str::from_utf8(&buf[..n]).unwrap();
+            assert_eq!(a, b, "rfc3339 fallback for {extreme:?} must agree");
+
+            let c = extreme.to_rfc2822();
+            let mut buf = [0u8; 64];
+            let n = extreme.write_rfc2822(&mut buf).unwrap();
+            let d = core::str::from_utf8(&buf[..n]).unwrap();
+            assert_eq!(c, d, "rfc2822 fallback for {extreme:?} must agree");
+        }
+    }
+
+    // Same consistency check for Zoned (its buffer fallback goes through the
+    // same `as u128`-shaped path and must not wrap negatives either).
+    for zone in [Zone::Utc, Zone::fixed(Offset::from_hms(8, 0, 0).unwrap())] {
+        for extreme in [
+            Ticks::from_unix_nanos(-(i128::MAX / 2)),
+            Ticks::from_unix_nanos(i128::MAX / 2),
+            Ticks::MIN,
+            Ticks::MAX,
+        ] {
+            let z = Zoned::new(extreme, zone);
+            let a = z.to_rfc3339(tzcraft::FractionDigits::None);
+            let mut buf = [0u8; 64];
+            let n = z
+                .write_rfc3339(&mut buf, tzcraft::FractionDigits::None)
+                .unwrap();
+            let b = core::str::from_utf8(&buf[..n]).unwrap();
+            assert_eq!(a, b, "zoned rfc3339 fallback for {extreme:?} must agree");
+
+            let c = z.to_rfc2822();
+            let mut buf = [0u8; 64];
+            let n = z.write_rfc2822(&mut buf).unwrap();
+            let d = core::str::from_utf8(&buf[..n]).unwrap();
+            assert_eq!(c, d, "zoned rfc2822 fallback for {extreme:?} must agree");
+        }
+    }
+}
+
+#[test]
 fn rfc2822_round_trips() {
     let t = Ticks::from_rfc3339("2024-01-01T10:52:37Z").unwrap();
     assert_eq!(t.to_rfc2822(), "Mon,  1 Jan 2024 10:52:37 +0000");
@@ -265,4 +325,7 @@ fn strftime_edge_cases() {
     let t = Ticks::from_rfc3339("2024-06-15T00:00:00Z").unwrap();
     assert_eq!(t.format("%s").unwrap(), "1718409600");
     assert_eq!(Ticks::parse_from_str("1718409600", "%s").unwrap(), t);
+    let before_epoch = Ticks::from_timestamp(-1, 0).unwrap();
+    assert_eq!(before_epoch.format("%s").unwrap(), "-1");
+    assert_eq!(d.format("日期：%Y-%m-%d").unwrap(), "日期：2024-12-31");
 }

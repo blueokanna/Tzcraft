@@ -27,7 +27,9 @@ comparison libraries never enter tzcraft's dependency graph.
 ## The short version
 
 - `Ticks` is the only instant type: a signed 128-bit nanosecond count since
-  the Unix epoch. Range ≈ ±292 billion years, full nanosecond precision.
+  the Unix epoch. Storage range ≈ ±5.4×10^21 years (the `i64`-second
+  accessors bound the usable range to ≈ ±292 billion years), full nanosecond
+  precision.
 - `Date`, `TimeOfDay` and `CivilDateTime` are pure projections of that
   timeline; they hold no arithmetic of their own.
 - Every civil computation is a `const fn`; timezones are `const` data

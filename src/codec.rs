@@ -266,13 +266,12 @@ impl NsonSerialize for Zone {
         } else {
             enc.begin_array()?;
             enc.separator()?;
-            match *self {
-                Zone::Utc => enc.write_u8(0)?,
-                Zone::Fixed(offset) => {
-                    enc.write_u8(1)?;
-                    enc.separator()?;
-                    enc.write_i32(offset.as_seconds())?;
-                }
+            if self.is_utc() {
+                enc.write_u8(0)?;
+            } else {
+                enc.write_u8(1)?;
+                enc.separator()?;
+                enc.write_i32(self.offset().as_seconds())?;
             }
             enc.end_array()
         }
@@ -291,24 +290,19 @@ impl<'de> NsonDeserialize<'de> for Zone {
         } else {
             dec.begin_array()?;
             let tag = dec.u8()?;
-            let mut payload: Option<i32> = None;
-            let mut count = 1u32;
-            while dec.array_has_more()? {
-                payload = Some(dec.i32()?);
-                count += 1;
-                if !dec.array_entry_sep()? {
-                    break;
-                }
-            }
-            dec.end_array()?;
-            let zone = match (tag, payload, count) {
-                (0, None, 1) => Zone::Utc,
-                (1, Some(secs), 2) => {
+            let zone = match tag {
+                0 if !dec.array_has_more()? => Zone::Utc,
+                1 if dec.array_has_more()? => {
+                    let secs = dec.i32()?;
+                    if dec.array_entry_sep()? {
+                        return Err(D::Error::custom("trailing data in zone encoding"));
+                    }
                     let offset = Offset::from_seconds(secs).map_err(codec_err)?;
                     Zone::fixed(offset)
                 }
                 _ => return Err(D::Error::custom("invalid zone encoding")),
             };
+            dec.end_array()?;
             out.write(zone);
         }
         Ok(())

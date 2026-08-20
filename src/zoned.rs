@@ -24,7 +24,7 @@ use crate::strftime;
 use crate::ticks::Ticks;
 use crate::time::TimeOfDay;
 use crate::units::{Days, Months};
-use crate::write::{with_buf, write_u128, FmtSink};
+use crate::write::{with_buf, write_signed_i128, FmtSink};
 use crate::zone::Zone;
 
 #[cfg(feature = "alloc")]
@@ -40,7 +40,10 @@ pub struct Zoned {
 impl Zoned {
     /// Build from an instant and a zone (the instant is not shifted).
     pub fn new(ticks: Ticks, zone: Zone) -> Zoned {
-        Zoned { ticks, zone }
+        Zoned {
+            ticks,
+            zone: Zone::fixed(zone.offset()),
+        }
     }
 
     /// Build from an instant carried as `Ticks`.
@@ -56,7 +59,7 @@ impl Zoned {
         let shifted = utc.checked_sub(Duration::from_seconds(zone.offset().as_seconds() as i64))?;
         Ok(Zoned {
             ticks: shifted,
-            zone,
+            zone: Zone::fixed(zone.offset()),
         })
     }
 
@@ -194,7 +197,7 @@ impl Zoned {
     pub fn with_zone(self, zone: Zone) -> Zoned {
         Zoned {
             ticks: self.ticks,
-            zone,
+            zone: Zone::fixed(zone.offset()),
         }
     }
 
@@ -219,7 +222,7 @@ impl Zoned {
         match self.civil() {
             Ok(dt) => format::write_rfc3339(out, dt.date(), dt.time(), self.offset(), fraction),
             Err(_) => with_buf(out, |b| {
-                write_u128(b, self.ticks.as_unix_nanos() as u128)?;
+                write_signed_i128(b, self.ticks.as_unix_nanos())?;
                 format::format_offset_into(b, self.offset())
             }),
         }
@@ -274,7 +277,7 @@ impl Zoned {
         match self.civil() {
             Ok(dt) => strftime::write_rfc2822(dt.date(), dt.time(), self.offset(), out),
             Err(_) => with_buf(out, |b| {
-                write_u128(b, self.ticks.as_unix_nanos() as u128)?;
+                write_signed_i128(b, self.ticks.as_unix_nanos())?;
                 format::format_offset_into(b, self.offset())
             }),
         }

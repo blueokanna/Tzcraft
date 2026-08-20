@@ -5,8 +5,9 @@
 //! later the counter would wrap negative. `tzcraft` cannot hit this by
 //! construction:
 //!
-//! - [`Ticks`] is `i128` nanoseconds since the epoch (range ≈ ±292 billion
-//!   years);
+//! - [`Ticks`] is `i128` nanoseconds since the epoch (storage range
+//!   ≈ ±5.4×10^21 years; the `i64`-second accessors bound the usable range
+//!   to ≈ ±292 billion years);
 //! - every `timestamp*` accessor and `from_timestamp*` constructor uses
 //!   `i64` seconds (range ≈ ±292 billion years, i.e. `i64::MAX` seconds);
 //! - [`Date`] is `i32` **days** since the epoch (range ≈ ±5.8 million

@@ -25,7 +25,7 @@ use crate::offset::Offset;
 use crate::strftime;
 use crate::time::TimeOfDay;
 use crate::units::{Days, Months};
-use crate::write::{with_buf, write_u128, FmtSink, Write};
+use crate::write::{with_buf, write_signed_i128, FmtSink, Write};
 use crate::zone::Zone;
 use crate::zoned::Zoned;
 
@@ -175,7 +175,9 @@ impl Ticks {
         if secs < 0 {
             return Err(Error::out_of_range("instant (before 1970)"));
         }
-        Ok(std::time::UNIX_EPOCH + std::time::Duration::new(secs as u64, nanos))
+        std::time::UNIX_EPOCH
+            .checked_add(std::time::Duration::new(secs as u64, nanos))
+            .ok_or_else(|| Error::out_of_range("system time"))
     }
 
     /// Checked addition of a signed duration.
@@ -315,7 +317,7 @@ impl Ticks {
         match self.to_civil_utc() {
             Ok(dt) => format::write_rfc3339(out, dt.date(), dt.time(), Offset::UTC, fraction),
             Err(_) => with_buf(out, |b| {
-                write_u128(b, self.0 as u128)?;
+                write_signed_i128(b, self.0)?;
                 b.write_byte(b's')
             }),
         }
@@ -374,7 +376,7 @@ impl Ticks {
         match self.to_civil_utc() {
             Ok(dt) => strftime::write_rfc2822(dt.date(), dt.time(), Offset::UTC, out),
             Err(_) => with_buf(out, |b| {
-                write_u128(b, self.0 as u128)?;
+                write_signed_i128(b, self.0)?;
                 b.write_str(" +0000")
             }),
         }
@@ -570,5 +572,8 @@ mod tests {
         let now = Ticks::now().unwrap();
         let year = now.to_civil_utc().unwrap().year();
         assert!((2000..=3000).contains(&year));
+        // Platform SystemTime ranges are often much narrower than Ticks.
+        // Conversion must return an error, never panic through `Add`.
+        let _ = Ticks::MAX.to_std_time();
     }
 }
